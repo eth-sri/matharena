@@ -222,6 +222,8 @@ def normalize_string(s, list_answer=False):
     # replace \mathrm{...} with ...
     s = re.sub(r"\\mathrm\{(.*?)\}", r" \1 ", s)
 
+    s = s.replace("F_{30}", "832040") # Fibonacci number present in one problem
+
     if "=" in s:
         s = s.split("=")[-1]
     if r"\in" in s and list_answer:
@@ -294,6 +296,7 @@ def replace_unicode(text: str) -> str:
     text = text.replace("\u00d7", r"\cdot")
     text = text.replace("\u202f", r" ")
     text = text.replace("\u2212", "-")
+    text = text.replace("\u03c0", r"\pi")
     return text, warning
 
 def remove_invalid_characters(text):

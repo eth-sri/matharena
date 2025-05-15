@@ -37,6 +37,9 @@ manual_mapper = {
     "\n\\begin{matrix}\nx \\\\ = \\\\ \\\\ \\sqrt{ \\\\ 4 \\\\ + \\\\ \\\\ 2 \\\\ \\sqrt{ \\\\ 3 \\\\ } \\\\ } \\end{matrix}\n": "\\sqrt{4 + 2\\sqrt{3}}",
     "a = 2, a = 3, a = \\frac{3 + i\\sqrt{3}}{2}, a = \\frac{3 - i\\sqrt{3}}{2}": "2,3,\\frac{3 + i\\sqrt{3}}{2}, \\frac{3 - i\\sqrt{3}}{2}",
     "a = 2, a = 3, a = \\frac{3 + i\\sqrt{3}}{2}, \\text{ or } a = \\frac{3 - i\\sqrt{3}}{2}": "2,3,\\frac{3 + i\\sqrt{3}}{2}, \\frac{3 - i\\sqrt{3}}{2}",
+    "\n\\begin{matrix}\n\\text{ } \\\\ F_{ \\\\ 30 \\\\ } \\\\ - \\\\ 2 \\\\ \\\\ \\times \\\\ \\\\ \\sqrt{ \\\\ \\\\ \\log \\\\ _ \\\\ 3 \\\\ \\\\ 2 \\\\ } \\end{matrix}\n": "(832040 - 2)\\sqrt{\\log_{3}2}",
+    "\n\\begin{matrix}\n\\text{ } \\\\ \\sqrt{ \\\\ \\log \\\\ _{ \\\\ 2 \\\\ } \\\\ P \\\\ } \\\\ = \\\\ \\\\ ( \\\\ F \\\\ _{ \\\\ 30 \\\\ } \\\\ \\\\ - \\\\ \\\\ 2 \\\\ ) \\\\ \\\\ \\sqrt{ \\\\ \\\\ \\log \\\\ _{ \\\\ 3 \\\\ } \\\\ \\\\ 2 \\\\ } \\end{matrix}\n": "(832040 - 2)\\sqrt{\\log_{3}2}",
+    "\n\\begin{matrix}\n\\frac{ \\\\ F_{ \\\\ 30 \\\\ } \\\\ - \\\\ 2 \\\\ \\, \\\\ } \\\\ \\\\ / \\\\ \\\\ \\sqrt{ \\\\ \\, \\\\ \\log_{ \\\\ 2 \\\\ } \\\\ \\, \\\\ 3 \\\\ \\, \\\\ } \\\\ \\end{matrix}\n": "\\frac{832040 - 2}{\\sqrt{\\log_{2}3}}",
 }
 
 # maps a full response to the answer, in case no \boxed{} is present
