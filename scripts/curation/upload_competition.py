@@ -51,6 +51,9 @@ if __name__ == "__main__":
             data_dict["points"] = answers[i]["points"]
             data_dict["grading_scheme"] = answers[i]["scheme"]
             sample_solution_file = os.path.join(folder, "solutions", f"{idx}.tex")
+            if not os.path.exists(sample_solution_file):
+                logger.warning(f"Sample solution file {sample_solution_file} does not exist, skipping.")
+                continue
             data_dict["sample_solution"] = open(sample_solution_file, "r").read()
             sample_grading_file = os.path.join(folder, "sample_grading", f"{idx}.txt")
             data_dict["sample_grading"] = open(sample_grading_file, "r").read()

@@ -1,7 +1,7 @@
 model: claude-3-7-sonnet-20250219
 api: anthropic
 max_tokens: 64000
-concurrent_requests: 10
+concurrent_requests: 1
 temperature: 1
 top_p: null
 thinking:
@@ -9,6 +9,6 @@ thinking:
   budget_tokens: 32000
 read_cost: 3
 write_cost: 15
-batch_processing: true
+batch_processing: false
 human_readable_id: Claude-3.7-Sonnet (Think)
 date: "2025-02-19"

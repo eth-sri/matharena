@@ -54,7 +54,10 @@ class CoTSolver:
     
     def add_response(self, query, response):
         query, _ = query
-        if isinstance(response, tuple) and response[0] is None:
+        if isinstance(response, list):
+            for msg in response:
+                query.append(msg)
+        elif isinstance(response, tuple) and response[0] is None:
             query.append({"role": "api_error", "content": str(response[1])})
         else:
             query.append({"role": "assistant", "content": response})

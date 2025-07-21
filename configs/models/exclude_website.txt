@@ -1,2 +1,4 @@
 other/.*
 llama4/*
+openai/o3-mini--low-many
+phi4/.*

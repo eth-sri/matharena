@@ -1,0 +1,8 @@
+instruction: "You are solving a problem from Project Euler. You have access to a code execution environment where you can execute code. Once you are done, put your final answer within \\boxed{{}}."
+default_temperature: 0.6
+default_max_tokens: 16000
+strict_parsing: false
+n_problems: 12
+date: "2035-02-15"
+dataset_path: data/euler/euler
+n_code_executions: 10

@@ -1,13 +1,9 @@
-model: deepseek/deepseek-chat-v3-0324
-api: openrouter
-max_tokens: 32000
+model: deepseek-chat
+api: deepseek
+max_tokens: 64000
 temperature: 0.6
 top_p: 0.95
-provider:
-  allow_fallbacks: False
-  order:
-  - Parasail
-read_cost: 1.15
-write_cost: 1.2
+read_cost: 0.27
+write_cost: 1.10
 human_readable_id: DeepSeek-V3-03-24
 date: "2025-03-24"

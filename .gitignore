@@ -23,8 +23,12 @@ grading/
 latex/
 !usamo_report.pdf
 .gitlab-ci.yml
-data/
+data/*
 !data/ids.txt
+!data/euler/
+!data/euler/*
 scripts/paper
 paper_data/
+euler_logs/
 parser_judge_logs/
+*.env

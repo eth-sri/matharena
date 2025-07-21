@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 import re
+import regex
 from openai import AsyncOpenAI
 from tqdm import tqdm
 JUDGE_PROMPT = """You are a math expert that has a task to check if a proposed answer to a math problem is equivalent to the gold answer.
@@ -19,7 +20,7 @@ If they are equivalent, write "EQUIVALENT" in your last sentence. If they are no
 {answer}
 """
 
-BOXED_PATTERN = re.compile(r"\\boxed{(.*)}", re.DOTALL)
+BOXED_PATTERN = re.compile(r"\\boxed\{(.*?)\}", re.DOTALL)
 
 client = AsyncOpenAI(
   base_url="https://openrouter.ai/api/v1",
@@ -87,9 +88,12 @@ async def run_judgement(candidates, batch_size, n_samples=4):
         print(file)
     
 def extract_boxed(content):
-    matches = list(BOXED_PATTERN.finditer(content))
+    if "\\boxed" not in content:
+        return None
+    pattern = r"(boxed|fbox)\{((?:[^{}]|\{(?2)\})*)\}"
+    matches = list(regex.finditer(pattern, content))
     if matches:
-        return matches[-1].group(1)
+        return matches[-1].group(2)
     return None
 
 def main():
@@ -107,6 +111,8 @@ def main():
         for model in os.listdir(os.path.join(comp_dir, org)):
             for file in os.listdir(os.path.join(comp_dir, org, model)):
                 if file.endswith(".json"):
+                    # extract the number before json
+                    file_num = int(file.split("/")[-1].split(".")[0])
                     file_path = os.path.join(comp_dir, org, model, file)
                     with open(file_path, "r") as f:
                         data = json.load(f)
@@ -129,10 +135,12 @@ def main():
                                     pass
 
                                 if answer is not None:
+                                    print("Adding a candidate:\n")
+                                    print("Answer:\n", answer)
+                                    print("Gold answer:\n", gold_answer)
+                                    print("=" * 100)
                                     candidates.append((answer, gold_answer, data["correct"][i], file_path, i))
 
-    print("Total candidates to check: ", len(candidates))
-    
     if not os.path.exists("parser_judge_logs"):
         os.makedirs("parser_judge_logs")
     asyncio.run(run_judgement(candidates, args.batch_size, n_samples=args.n_samples))

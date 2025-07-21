@@ -1,0 +1,10 @@
+model: grok-4-0709
+api: xai
+max_tokens: 130000
+read_cost: 3
+write_cost: 15
+human_readable_id: Grok 4
+concurrent_requests: 4
+temperature: null
+top_p: null
+date: "2025-07-10"

@@ -223,7 +223,6 @@ def normalize_string(s, list_answer=False):
     s = re.sub(r"\\mathrm\{(.*?)\}", r" \1 ", s)
 
     s = s.replace("F_{30}", "832040") # Fibonacci number present in one problem
-
     if "=" in s:
         s = s.split("=")[-1]
     if r"\in" in s and list_answer:

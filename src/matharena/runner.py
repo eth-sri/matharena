@@ -14,7 +14,10 @@ from matharena.parser import extract_answer, parse_answer, check_answers, Warnin
 from matharena.possible_issues import check_number_proximity_any_order, check_all_numbers, check_output_length
 
 
-def validate_messages(messages):
+def validate_messages(messages, competition):
+    if "euler" in competition:
+        return True
+    
     if not any([message['role'] == 'assistant' for message in messages]):
         return False
     
@@ -49,6 +52,9 @@ def run(model_config, config_path, competition, skip_existing=False, output_fold
         del kwargs["date"]
     kwargs["max_tokens"] = max_tokens
     kwargs["temperature"] = temperature
+    
+    if "n_code_executions" in competition_config:
+        kwargs["n_code_executions"] = competition_config["n_code_executions"]
 
     logger.info(f"New run, model: {model}, competition: {competition}")
 
@@ -56,6 +62,18 @@ def run(model_config, config_path, competition, skip_existing=False, output_fold
 
     final_answer_comp = competition_config.get("final_answer", True)
     problem_types = None
+    if os.path.exists(competition_config["dataset_path"]):
+        answers_path = os.path.join(competition_config["dataset_path"], "answers.csv")
+        type_path = os.path.join(competition_config["dataset_path"], "problem_types.csv")
+        problems = []
+        
+        if os.path.exists(type_path):
+            with open(type_path, "r") as f:
+                problem_types = csv.DictReader(f)
+                problem_types = {int(row["id"]): row["type"] for row in problem_types}
+                for problem_id in problem_types:
+                    problem_types[problem_id] = problem_types[problem_id].replace('"', "").replace("[", "").replace("]", "").split(',')
+
     if os.path.exists(competition_config["dataset_path"]):
         answers_path = os.path.join(competition_config["dataset_path"], "answers.csv")
         type_path = os.path.join(competition_config["dataset_path"], "problem_types.csv")
@@ -79,6 +97,7 @@ def run(model_config, config_path, competition, skip_existing=False, output_fold
     else:
         problems = load_dataset(competition_config["dataset_path"], split="train").to_list()
 
+
     # sort by problem_idx
     problems = sorted(problems, key=lambda x: x["problem_idx"])
 
@@ -89,9 +108,9 @@ def run(model_config, config_path, competition, skip_existing=False, output_fold
     batch_idx_to_problem_idx = {}
 
     all_messages_per_problem = {i: [] for i in range(len(problems))}
-    detailed_costs_per_problem = {i: [] for i in range(len(problems))}
+    detailed_costs_per_problem = {i: [] for i in range(len(problems))}    
 
-    for i, problem in enumerate(problems):
+    for i, problem in enumerate(problems):        
         problem_id = problem["problem_idx"]
         output_file = os.path.join(output_dir, f"{problem_id}.json")
         if skip_existing and os.path.exists(output_file):
@@ -108,10 +127,10 @@ def run(model_config, config_path, competition, skip_existing=False, output_fold
                                     "output_tokens": cost["output_tokens"] if i == 0 else 0} 
                                     for i in range(len(messages))]
             detailed_costs = [detailed_costs_one for detailed_costs_one, messages_one in 
-                                zip(detailed_costs, messages) if validate_messages(messages_one) or skip_all
+                                zip(detailed_costs, messages) if validate_messages(messages_one, competition) or skip_all
                                 ]
             messages = [
-                messages_one for messages_one in messages if validate_messages(messages_one) or skip_all
+                messages_one for messages_one in messages if validate_messages(messages_one, competition) or skip_all
             ]
             detailed_costs_per_problem[i] = detailed_costs
             all_messages_per_problem[i] = messages
@@ -155,6 +174,12 @@ def run(model_config, config_path, competition, skip_existing=False, output_fold
                                       detailed_costs_per_problem[problem_idx], 
                                       problem_idx, competition_config["strict_parsing"], 
                                       final_answer=final_answer_comp)
+
+def safe_str_int(x, max_digits=4300):
+    s = str(x)
+    if len(s) > max_digits:
+        return f"{s[:20]}...({len(s)} digits)...{s[-20:]}"
+    return s
 
 def calculate_problem_results(model_config, problem, output_dir, messages_problem, 
                               costs_problem, problem_idx, strict_parsing, 
@@ -250,8 +275,8 @@ def calculate_problem_results(model_config, problem, output_dir, messages_proble
 def convert_answer(answer):
     try:
         if type(answer) == sympy.Integer:
-            return int(answer)
+            return safe_str_int(int(answer))
         else:
-            return str(answer)
+            return safe_str_int(answer)
     except:
         return "None"

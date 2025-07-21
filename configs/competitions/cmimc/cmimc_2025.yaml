@@ -1,0 +1,7 @@
+instruction: "Please reason step by step, and put your final answer within \\boxed{{}}. Thus, format your final answer as follows:\n\n### Final answer\n\nThe final answer is \\boxed{{your final answer}}."
+default_temperature: 0.6
+default_max_tokens: 16000
+strict_parsing: false
+n_problems: 40
+date: "2025-06-30"
+dataset_path: data/cmimc/cmimc_2025

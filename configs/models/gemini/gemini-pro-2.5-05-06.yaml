@@ -1,0 +1,12 @@
+model: gemini-2.5-pro-preview-05-06
+api: google
+max_tokens: null
+temperature: null
+top_p: null
+concurrent_requests: 8
+config:
+  max_output_tokens: 64000
+read_cost: 0
+write_cost: 0
+human_readable_id: gemini-2.5-pro-05-06
+date: "2025-05-06"

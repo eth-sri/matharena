@@ -1,9 +1,10 @@
 model: o3--high
 api: openai
-max_tokens: 64000
-read_cost: 10
-write_cost: 40
+max_tokens: 100000
+read_cost: 2
+write_cost: 8
 human_readable_id: o3 (high)
-batch_processing: true
+batch_processing: false
 openai_responses: true
 date: "2025-04-16"
+concurrent_requests: 4

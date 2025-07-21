@@ -5,7 +5,10 @@
 <img alt="Build" src="https://img.shields.io/badge/Python-3.12-1f425f.svg?color=blue">
   </a>
   <a href="https://opensource.org/licenses/MIT">
-<img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg">
+<img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg">
+  </a>
+  <a href="https://huggingface.co/MathArena">
+<img alt="MathArena Datasets" src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Matharena-ffc107?color=ffc107&logoColor=white">
   </a>
 </div>
 
@@ -19,6 +22,7 @@ MathArena is a platform for the evaluation of LLMs on the latest math competitio
   - [Model Configuration](#model-configuration)
   - [Running the Model](#running-the-model)
   - [Local VLLM Usage](#running-models-locally-using-vllm)
+  - [Project Euler](#project-euler)
 - [Adding a Competition](#adding-a-competition)
   - [Setting Up Competition Files](#setting-up-competition-files)
   - [Verifying Problem Statements](#verifying-problem-statements)
@@ -90,7 +94,7 @@ uv run python scripts/run.py --configs path/to/your/config --comp path/to/compet
 
 **Example:**
 ```bash
-uv run python scripts/run.py --configs openai/gpt-4o --comp aime/aime_2025_I
+uv run python scripts/run.py --configs openai/gpt-4o --comp aime/aime_2025
 ```
 
 **Additional Flags:**
@@ -112,6 +116,10 @@ You can upload the model answers to HuggingFace as follows:
 uv run python scripts/curation/upload_outputs.py --org your_org --repo-name your_repo_name --comp path/to/competition
 ```
 This will upload all model answers to a private repository named `your_org/your_repo_name`. `path/to/competition` is the relative path from the `configs/competition` folder to the competition folder (excluding the `.yaml` extension).
+
+### Project Euler
+For Project Euler, several additional steps need to be taken. Please check README_euler.md for the full details.
+
 
 ## ➕ Adding a Competition
 
@@ -185,21 +193,7 @@ This will run models from the same API sequentially and from different APIs conc
 *Note:* For local vllm usage, ensure the vllm server is running as described above. Logs will be found in the `logs/` folder.
 
 ### Competitions Requiring Grading
-To set up grading of questions, convert the model answers to TeX files: 
-```bash
-uv run python scripts/judge/answers_to_latex.py --comp path/to/competition
-```
-This will compile all model answers in a PDF file in the folder `latex/path/to/competition`.
-
-Now, collect all PDFs for all evaluated models in a single folder using:
-```bash
-uv run python scripts/judge/collect_pdfs.py --comp path/to/competition
-```
-This will put all PDFs associated with question with idx `i` in the folder `latex/path/to/competition/i`. Each PDF will be given a unique (anonymous) ID. Follow the instructions in `README_judges.md` to grade each PDF. The grading of a single PDF should be placed in `grading/path/to/competition/i/{ID}.json`, where the ID is the ID given to the PDF associated with the grading. In case a PDF is graded by multiple people, you can add more files by naming them `grading/path/to/competition/i/{ID}_{X}.json` where `X` is any suffix. Finally, run
-```bash
-uv run python scripts/judge/merge_judgments.py --comp path/to/competition
-```
-This will add the judgments directly in the raw output traces of the models.
+For competitions requiring human grading, we use the Open Proof Corpus repository: https://github.com/insait-institute/open-proof-corpus. This repository contains instructions to run models on questions and competitions and contains a nice grading interface for judges. It also contains a script that converts that format to the MathArena format. The result of this script should simply be copy-pasted to `outputs/path/to/competition` for use and display in this repository.
 
 ### Running LLMs as judges
 To run an LLM as a judge, you must first add the solutions of all problems of the competition in `data/path/to/competition/solutions/{i}.text` where `i` is the index of the problem. 
@@ -308,6 +302,7 @@ To create a table containing results per category (Combinatorics, Number Theory,
 ```bash
 uv run python scripts/extraction/type_scoring.py --comps aime/aime_2025  hmmt/hmmt_feb_2025
 ```
+
 
 ## 📚 Citation
 

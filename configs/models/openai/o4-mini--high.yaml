@@ -1,8 +1,9 @@
 model: o4-mini--high
 api: openai
-max_tokens: 64000
+max_tokens: 100000
 read_cost: 1.1
 write_cost: 4.4
+concurrent_requests: 10
 human_readable_id: o4-mini (high)
 batch_processing: false
 openai_responses: true

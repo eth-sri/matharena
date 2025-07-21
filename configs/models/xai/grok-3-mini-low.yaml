@@ -1,6 +1,6 @@
 model: grok-3-mini-beta
 api: xai
-max_tokens: 32000
+max_tokens: 131000
 read_cost: 0.3
 write_cost: 0.5
 human_readable_id: Grok 3 Mini (low)

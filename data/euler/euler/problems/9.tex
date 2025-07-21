@@ -1,0 +1,13 @@
+Two players play a game using a deck of $2n$ cards: $n$ red and $n$ black. Initially the deck is shuffled into one of the $\binom{2n}{n}$ possible starting configurations. Play then proceeds, alternating turns, where a player follows two steps on each turn:
+
+- Remove the top card from the deck, taking note of its colour.
+- If there is a next card and it is the same colour as the previous card they toss a fair coin. If the coin lands on heads they remove that card as well; otherwise leave it on top of the deck.
+
+The player who removes the final card from the deck wins the game.
+
+Some starting configurations give an advantage to one of the players; while some starting configurations are <b>fair</b>, in which both players have exactly $50\%$ chance to win the game. For example, if $n=2$ there are four starting configurations which are fair: RRBB, BBRR, RBBR, BRRB. The remaining two, RBRB and BRBR, result in a guaranteed win for the second player.</p>
+
+Define $F(n)$ to be the number of starting configurations which are fair. Therefore $F(2)=4$. You are also given $F(8)=11892$.
+
+Find $F(26)$.
+

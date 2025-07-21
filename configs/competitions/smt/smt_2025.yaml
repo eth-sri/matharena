@@ -2,6 +2,6 @@ instruction: "Please reason step by step, and put your final answer within \\box
 default_temperature: 0.6
 default_max_tokens: 16000
 strict_parsing: false
-n_problems: 43
-date: "2025-05-05"
+n_problems: 53
+date: "2025-07-21"
 dataset_path: data/smt/smt_2025

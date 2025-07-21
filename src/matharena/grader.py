@@ -185,8 +185,6 @@ def calculate_grading_results(problem, output_dir, gradings_per_solution, markin
                 logger.error(f'Mismatch between marking schema lengths')
                 warning = max(warning,WarningType.MAJOR)
             else:
-                if anon_id == 'ecddbb':
-                    breakpoint()
                 final_points = 0
                 for (given, expected) in zip(parsed_grading["details"], marking_schema):
                     if not similar(given["title"], expected["title"]):

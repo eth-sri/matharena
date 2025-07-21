@@ -1,9 +1,13 @@
-model: Qwen/Qwen3-30B-A3B
-api: vllm
+model: qwen/qwen3-30b-a3b
+api: openrouter
 max_tokens: 32000
 temperature: 0.6
 top_p: 0.95
-concurrent_requests: 200
+concurrent_requests: 10
+provider:
+  allow_fallbacks: False
+  order:
+  - nebius
 read_cost: 0.1
 write_cost: 0.3
 human_readable_id: Qwen3-30B-A3B

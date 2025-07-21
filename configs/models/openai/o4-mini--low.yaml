@@ -1,9 +1,9 @@
 model: o4-mini--low
 api: openai
-max_tokens: 64000
+max_tokens: 100000
 read_cost: 1.1
 write_cost: 4.4
 human_readable_id: o4-mini (low)
-batch_processing: true
+batch_processing: false
 openai_responses: true
 date: "2025-04-16"
