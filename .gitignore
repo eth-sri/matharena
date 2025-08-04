@@ -32,3 +32,6 @@ paper_data/
 euler_logs/
 parser_judge_logs/
 *.env
+euler_cookies.pkl
+data/autobench/
+data/autobench_highschool/

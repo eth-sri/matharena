@@ -31,6 +31,7 @@ uv run python scripts/run.py --configs gemini/gemini-pro-2.5 --comp euler/euler 
 Once all the models have run, the last part is submitting the results to the Project Euler website to check correctness. You can do this by running the following command:
 
 ```bash
+uv run playwright install # if not installed yet, otherwise this step can be skipped
 uv run python scripts/project_euler_submit.py --problem_id 12
 ```
 

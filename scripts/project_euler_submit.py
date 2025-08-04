@@ -19,6 +19,8 @@ import os
 import pickle
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+import pandas as pd
+import subprocess
 
 load_dotenv()
 
@@ -268,6 +270,20 @@ def main():
                     html_path = f"euler_logs/{problem_id}/submission_{answer}.html"
                     with open(html_path, "w") as f:
                         f.write(page.content())
+                    if 'src="images/clipart/answer_correct.png"' in result_content:
+                        print(f"Answer {answer} is correct!")
+                        # store it in answers.csv
+                        path = f"data/euler/{euler}/answers.csv"
+                        csv_res = pd.read_csv(path)
+                        # get the row with the problem_id
+                        if problem_id in csv_res["id"].values:
+                            csv_res.loc[csv_res["id"] == problem_id, "answer"] = answer
+                        
+                        csv_res.to_csv(path, index=False)
+                        # reparse all answers by running python scripts/reparse_all.py --comp euler/euler
+                        subprocess.run(["python", "scripts/curation/reparse_all.py", "--comp", f"euler/{euler}"])
+                        exit(0)
+                        
                     print(f"Saved submission result HTML to {html_path}")
                     is_submitted = True
                     screenshot_path = f"euler_logs/{problem_id}/submission_{answer}.png"

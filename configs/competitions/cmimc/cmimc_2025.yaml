@@ -3,5 +3,5 @@ default_temperature: 0.6
 default_max_tokens: 16000
 strict_parsing: false
 n_problems: 40
-date: "2025-06-30"
+date: "2025-07-29"
 dataset_path: data/cmimc/cmimc_2025

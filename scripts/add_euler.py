@@ -35,3 +35,21 @@ euler_answers_path = "data/euler/euler/answers.csv"
 with open(euler_answers_path, "a", newline='') as f:
     writer = csv.DictWriter(f, fieldnames=['id', 'answer'])
     writer.writerow({'id': next_idx, 'answer': "none"})
+
+# increase number of problems in the config
+import yaml
+config_path = "configs/competitions/euler/euler.yaml"
+with open(config_path, "r") as f:
+    config = yaml.safe_load(f)
+config['n_problems'] += 1
+with open(config_path, "w") as f:
+    yaml.safe_dump(config, f)
+
+# increase number of problems in the website config
+website_config_path = "website/flaskr/static/data/competitions.json"
+import json
+with open(website_config_path, "r") as f:
+    website_config = json.load(f)
+website_config['euler--euler']['num_problems'] += 1
+with open(website_config_path, "w") as f:
+    json.dump(website_config, f, indent=4)

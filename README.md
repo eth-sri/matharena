@@ -304,6 +304,12 @@ uv run python scripts/extraction/type_scoring.py --comps aime/aime_2025  hmmt/hm
 ```
 
 
+## Post-Processing Results
+To post-process results to add them to our website, you should run
+```bash
+bash scripts/website/postprocess.sh path/to/competition
+```
+
 ## 📚 Citation
 
 ```

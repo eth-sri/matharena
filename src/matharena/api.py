@@ -471,8 +471,6 @@ class APIQuery:
             
         json_response = response.json()
 
-        print(json_response)
-
         if "choices" not in json_response:
             raise Exception(f"Error: {json_response}")
 
@@ -507,7 +505,7 @@ class APIQuery:
             }
     
     def google_query(self, query):
-        client = genai.Client(api_key=self.api_key, http_options={'api_version':'v1alpha'})
+        client = genai.Client(api_key=self.api_key)
         query, image_path = query
         parts = []
         if image_path is not None:
@@ -533,7 +531,7 @@ class APIQuery:
             "output": "\n\n".join([response.candidates[0].content.parts[i].text 
                                    for i in range(len(response.candidates[0].content.parts))]),
             "input_tokens": response.usage_metadata.prompt_token_count,
-            "output_tokens": response.usage_metadata.total_token_count,
+            "output_tokens": output_tokens,
         }
 
     def together_query(self, query):
@@ -542,11 +540,12 @@ class APIQuery:
         response = client.chat.completions.create(
             model=self.model,
             messages=query,
+            timeout=self.timeout,
             **self.kwargs
         )
         output = response.choices[0].message.content
         if hasattr(response.choices[0].message, "reasoning_content"):
-            output = response.choices[0].message.reasoning_content + "\n\n" + output
+            output = response.choices[0].message.reasoning_content + "</think>" + output
         return {
             "output": output,
             "input_tokens": response.usage.prompt_tokens,
@@ -721,7 +720,6 @@ class APIQuery:
         input_tokens = response.usage_metadata.prompt_token_count
         output_tokens = response.usage_metadata.total_token_count - response.usage_metadata.prompt_token_count
         for it in range(self.n_code_executions):
-            print(response)
             if "MALFORMED_FUNCTION_CALL" in str(response.candidates[0].finish_reason) or (response.candidates[0].content.parts is None):
                 print("Malformed output, stopping!")
                 output_contents.append({"role": "model", "content": "Malformed function call or output, stopping."})
@@ -770,9 +768,7 @@ class APIQuery:
             output_contents.append(response.candidates[0].content)
         parsed_output_msgs = []
         role2role = {"model": "assistant", "user": "user", "tool": "tool", "code": "code"}
-        print("output_contents: ", output_contents)
         for content in output_contents:
-            print("content: ", content)
             if content is None:
                 continue
             if type(content) == dict:
@@ -811,7 +807,6 @@ class APIQuery:
             max_retries = 5
             while response is None and max_retries > 0:
                 try:
-                    print("trying messages: ", messages)
                     response = client.responses.create(
                         model=self.model,
                         tools=[{"type": "code_interpreter", "container": {"type": "auto"}}],
@@ -827,7 +822,6 @@ class APIQuery:
                     else:
                         raise e
                 
-            print('response: ', response)
             out_msgs = []
             for out in response.output:
                 if out.type == "message":
@@ -840,7 +834,6 @@ class APIQuery:
                     pass
                 else:
                     print("output type: ", out.type)
-            print('out_msgs: ', out_msgs)
             return {
                 "output": out_msgs,
                 "input_tokens": response.usage.input_tokens,
@@ -854,7 +847,6 @@ class APIQuery:
             timeout=self.timeout,
             **self.kwargs
         )
-        print(response)
         input_tokens = response.usage.prompt_tokens
         output_tokens = response.usage.completion_tokens
         output_messages = []

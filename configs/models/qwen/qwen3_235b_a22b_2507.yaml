@@ -1,0 +1,15 @@
+model: qwen/qwen3-235b-a22b-thinking-2507
+api: openrouter
+max_tokens: 81920
+temperature: 0.6
+top_p: 0.95
+top_k: 20
+concurrent_requests: 16
+provider:
+  allow_fallbacks: False
+  order:
+  - Parasail
+read_cost: 0.6
+write_cost: 1.2
+human_readable_id: Qwen3-A22B-2507-Think
+date: "2025-07-25"

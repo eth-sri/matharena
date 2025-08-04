@@ -1,0 +1,12 @@
+model: gemini-2.5-pro
+api: google
+max_tokens: null
+temperature: null
+top_p: null
+concurrent_requests: 1
+config:
+  max_output_tokens: 130000
+read_cost: 1.25
+write_cost: 10.00
+human_readable_id: gemini-2.5-pro (agent)
+date: "2025-03-25"

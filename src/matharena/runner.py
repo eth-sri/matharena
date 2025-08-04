@@ -187,7 +187,7 @@ def calculate_problem_results(model_config, problem, output_dir, messages_proble
     problem_id = problem["problem_idx"]
 
     problem_statement = problem["problem"]
-    list_answer = "," in str(problem["answer"])
+    list_answer = "," in str(problem["answer"]) if final_answer else False
 
     if final_answer:
         gold_answer, _ = parse_answer(str(problem["answer"]), list_answer=list_answer)
