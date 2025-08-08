@@ -12,7 +12,7 @@ from matharena.api import APIQuery
 from matharena.cot_solver import CoTSolver
 from matharena.parser import extract_answer, parse_answer, check_answers, WarningType
 from matharena.possible_issues import check_number_proximity_any_order, check_all_numbers, check_output_length
-
+from transformers import AutoTokenizer
 
 def validate_messages(messages, competition):
     if "euler" in competition:
@@ -28,7 +28,7 @@ def validate_messages(messages, competition):
     return True
 
 def run(model_config, config_path, competition, skip_existing=False, output_folder="outputs", 
-        competition_config_folder="competition_configs", skip_all=False):
+        competition_config_folder="competition_configs", skip_all=False, recompute_tokens=False):
     model = model_config["model"]
     n = model_config["n"]
     api = model_config["api"]
@@ -45,6 +45,7 @@ def run(model_config, config_path, competition, skip_existing=False, output_fold
     del kwargs["n"]
     del kwargs["api"]
     del kwargs["human_readable_id"]
+
     if "date" in kwargs:
         date_model = datetime.strptime(kwargs["date"], "%Y-%m-%d")
         if date_model > date_comp:
@@ -117,15 +118,23 @@ def run(model_config, config_path, competition, skip_existing=False, output_fold
             data_file = json.load(open(output_file))
             messages = data_file["messages"]
             
-            # print all the message lengths
-            if "detailed_costs" in data_file:
-                detailed_costs = data_file["detailed_costs"]
+            if recompute_tokens and api=='vllm' :
+                tokenizer = AutoTokenizer.from_pretrained(model)
+                detailed_costs = [{"cost": len(tokenizer(messages[i][1]['content'], return_tensors="pt")['input_ids'][0])*model_config['read_cost']/1000000 + \
+                                   len(tokenizer(messages[i][-1]['content'], return_tensors="pt")['input_ids'][0])*model_config['write_cost']/1000000, 
+                                        "input_tokens": len(tokenizer(messages[i][1]['content'], return_tensors="pt")['input_ids'][0]), 
+                                        "output_tokens": len(tokenizer(messages[i][-1]['content'], return_tensors="pt")['input_ids'][0])} 
+                                        for i in range(len(messages))]
             else:
-                cost = data_file["cost"]
-                detailed_costs = [{"cost": cost["cost"] if i == 0 else 0, 
-                                    "input_tokens": cost["input_tokens"] if i == 0 else 0, 
-                                    "output_tokens": cost["output_tokens"] if i == 0 else 0} 
-                                    for i in range(len(messages))]
+                # print all the message lengths
+                if "detailed_costs" in data_file:
+                    detailed_costs = data_file["detailed_costs"]
+                else:
+                    cost = data_file["cost"]
+                    detailed_costs = [{"cost": cost["cost"] if i == 0 else 0, 
+                                        "input_tokens": cost["input_tokens"] if i == 0 else 0, 
+                                        "output_tokens": cost["output_tokens"] if i == 0 else 0} 
+                                        for i in range(len(messages))]
             detailed_costs = [detailed_costs_one for detailed_costs_one, messages_one in 
                                 zip(detailed_costs, messages) if validate_messages(messages_one, competition) or skip_all
                                 ]

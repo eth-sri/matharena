@@ -1,23 +1,33 @@
-import anthropic
-import re
-import os
-import time
 import base64
-import requests
 import json
+import os
+import re
 import tempfile
+import time
 import traceback
-from loguru import logger
-from tqdm import tqdm
-from google import genai
-from google.genai import types
-from openai import OpenAI, RateLimitError
-from together import Together
-from anthropic.types import ThinkingBlock, TextBlock
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+
+import anthropic
+import requests
+from anthropic.types import TextBlock, ThinkingBlock
 from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
 from anthropic.types.messages.batch_create_params import Request
+from google import genai
+from google.genai import types
+from loguru import logger
+from openai import OpenAI, RateLimitError
+from together import Together
+from tqdm import tqdm
+
+from matharena.code_execution import EXEC_TIMEOUT, PY_LIBRARIES, CodeRunner
 from concurrent.futures import ThreadPoolExecutor, as_completed, ProcessPoolExecutor
 from matharena.code_execution import CodeRunner, PY_LIBRARIES, EXEC_TIMEOUT
+from transformers import AutoTokenizer
+
+try:
+    from vllm import LLM, SamplingParams
+except ImportError:
+    LLM = None
 
 CODE_TOOLS = [{
     "type": "function",
@@ -62,6 +72,8 @@ class APIQuery:
                  sleep_after_request=0.1,
                  throw_error_on_failure=False,
                  max_tokens_param="max_tokens",
+                 system_prompt=None,
+                 developer_message=None,
                  reasoning_effort=None,
                  batch_processing=False,
                  openai_responses=False,
@@ -77,7 +89,11 @@ class APIQuery:
                     thinking_budget=kwargs["config"]["thinking_budget"],
                 )
                 del kwargs["config"]["thinking_budget"]
-        if ("o1" in model or "o3" in model or "o4" in model) and api == "openai":
+        if api == 'vllm':
+            self.tokenizer_kwargs = kwargs.get("tokenizer_kwargs", {})
+            if 'tokenizer_kwargs' in kwargs:
+                del kwargs["tokenizer_kwargs"]
+        if ("o1" in model or "o3" in model or "o4" in model or "gpt-5" in model) and api == "openai":
             logger.info("Not using system messages for o1/o3/o4 model.")
             no_system_messages = True # o1 model cannot handle system messages
             if not openai_responses:
@@ -112,6 +128,8 @@ class APIQuery:
         self.write_cost = write_cost
         self.batch_processing = batch_processing
         self.openai_responses = openai_responses
+        self.system_prompt = system_prompt
+        self.developer_message = developer_message
         self.n_code_executions = n_code_executions
         if max_tokens is not None:
             self.max_tokens_param = max_tokens_param
@@ -126,6 +144,23 @@ class APIQuery:
         self.base_url = None
 
         self.initialize_api_keys()
+
+        if self.api == "vllm":
+            if LLM is None:
+                raise ImportError("vllm is not installed. pip install vllm")
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model)
+            vllm_args = {}
+
+            for p in ("temperature", "top_p", "max_tokens"):
+                if p in self.kwargs:
+                    vllm_args[p] = self.kwargs.pop(p)
+            self.sampling_params = SamplingParams(
+                **vllm_args
+            )
+            self.vllm_model = LLM(
+                model=self.model, tensor_parallel_size=4 if 'n_gpus' not in kwargs else kwargs['n_gpus']
+            )
+            logger.info(f"Loaded local vllm model `{self.model}` with sampling {kwargs}")
 
     def kwarg_remover(self, api, model, kwargs):
         if any([kw in model for kw in ["o1", "o3", "o4"]]) and "temperature" in kwargs:
@@ -163,6 +198,10 @@ class APIQuery:
             self.api_key = os.getenv("HYPERBOLIC_API_KEY")
             self.base_url = "https://api.hyperbolic.xyz/v1"
             self.api = "openai"
+        elif self.api == "glm":
+            self.api_key = os.getenv("GLM_API_KEY")
+            self.base_url = "https://open.bigmodel.cn/api/paas/v4/"
+            self.api = "openai"
         elif self.api == 'sambanova':
             self.api_key = os.getenv("SAMBA_API_KEY")
             self.base_url = "https://api.sambanova.ai/v1"
@@ -182,13 +221,7 @@ class APIQuery:
             self.base_url = "https://api.fireworks.ai/inference/v1"
             self.api = "openai"
         elif self.api == "vllm":
-            self.api_key = "token-abc123"
-            self.api = "openai"
-            self.base_url = f"http://localhost:8000/v1"
-            # command = f"vllm serve {self.model} --dtype auto --api-key token-abc123"
-            # Launch the command in the back_round.
-            # subprocess.Popen(command.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            # Poll the server until it's running.
+            return
         else:
             raise ValueError(f"API {self.api} not supported.")
 
@@ -220,20 +253,32 @@ class APIQuery:
                 queries_actual.append((query, None))
             else:
                 queries_actual.append(query)
-        if self.api == "vllm":
-            while True:
-                try:
-                    response = requests.get(f"{self.base_url}", timeout=1)
-                    if response.status_code == 401: # unauthorized, because no api key here
-                        break
-                except Exception:
-                    pass
-                time.sleep(5)
-                logger.info("Waiting for VLLM server to start...")
-            logger.info("VLLM server started.")
+            
+            if self.developer_message is not None and queries_actual[-1][0][0]["role"] != "developer":
+                index = 0 if queries_actual[-1][0][0]["role"] != "system" else 1
+                queries_actual[-1][0].insert(index, {
+                    "role": "developer",
+                    "content": self.developer_message
+                })
 
+            if self.system_prompt is not None and queries_actual[-1][0][0]["role"] != "system":
+                queries_actual[-1][0].insert(0, {
+                    "role": "system",
+                    "content": self.system_prompt
+                })
         logger.info(f"Running {len(queries_actual)} queries.")
 
+        if self.api == "vllm":
+            queries_actual = [self.tokenizer.apply_chat_template(
+                                        query[0],
+                                        tokenize=False,
+                                        add_generation_prompt=True,
+                                        **self.tokenizer_kwargs
+                                    ) for query in queries_actual]
+            # Bypass threading and batch everything into one local generate
+            yield from self._run_vllm_queries(queries_actual)
+            return
+        
         if self.batch_processing:
             if self.api == "openai":
                 processed_results = self.openai_batch_processing(queries_actual)
@@ -274,6 +319,29 @@ class APIQuery:
                     }
                     yield idx, result["output"], detailed_cost
     
+    def _run_vllm_queries(self, queries_actual):
+        """
+        Batch all queries into one vllm.generate(...) call, collect final states, yield in order.
+        """
+        tasks = []
+        for idx, query in enumerate(queries_actual):
+            tasks.append({"id": str(idx), "prompt": query})
+
+        logger.info(f"Running {len(tasks)} queries on local vllm…")
+        last_outputs = []
+        for batch in self.vllm_model.generate(tasks, sampling_params = self.sampling_params):
+            for out in batch.outputs:
+                last_outputs.append(out)
+
+        for idx, out in enumerate(last_outputs):
+            text = out.text
+            inp = getattr(out, "n_input_tokens", 0)
+            outp = getattr(out, "n_output_tokens", 0)
+            cost = {"cost": (inp*self.read_cost + outp*self.write_cost)/1e6,
+                    "input_tokens": inp,
+                    "output_tokens": outp}
+            yield idx, text, cost
+
     def run_query_with_retry(self, query):
         i = 0
         while i < self.max_retries:
@@ -454,7 +522,6 @@ class APIQuery:
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json',
         }
-
         query_key = "messages" if self.is_chat else "prompt"
 
         response = requests.post(
@@ -468,7 +535,6 @@ class APIQuery:
         )
         if response.status_code != 200:
             raise Exception(f"Error: {response.status_code} - {response.text}")
-            
         json_response = response.json()
 
         if "choices" not in json_response:
@@ -477,7 +543,9 @@ class APIQuery:
         if self.is_chat:
             output = json_response['choices'][0]['message']['content']
             if "reasoning_content" in json_response['choices'][0]['message'] and json_response['choices'][0]['message']['reasoning_content'] is not None:
-                output = json_response['choices'][0]['message']['reasoning_content'] + "</think>\n\n" + output
+                output = json_response['choices'][0]['message']['reasoning_content'] + "</think>" + output
+            elif "reasoning" in json_response['choices'][0]['message'] and json_response['choices'][0]['message']['reasoning'] is not None:
+                output = json_response['choices'][0]['message']['reasoning'] + "</think>" + output
             return {
                 "output": output,
                 "input_tokens": json_response['usage']['prompt_tokens'],
@@ -537,6 +605,7 @@ class APIQuery:
     def together_query(self, query):
         client = Together()
         query, image_path = query
+        print(query)
         response = client.chat.completions.create(
             model=self.model,
             messages=query,
@@ -958,7 +1027,7 @@ class APIQuery:
                 output = ""
             if hasattr(response.choices[0].message, "reasoning_content") and \
                 response.choices[0].message.reasoning_content is not None:
-                output = response.choices[0].message.reasoning_content + "\n\n" + output
+                output = response.choices[0].message.reasoning_content + "</think>" + output
             input_tokens = response.usage.prompt_tokens
             output_tokens = response.usage.completion_tokens
             if self.base_url is not None and "api.x.ai" in self.base_url:

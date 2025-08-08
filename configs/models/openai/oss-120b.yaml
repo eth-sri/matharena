@@ -1,0 +1,14 @@
+model: openai/gpt-oss-120b
+api: vllm
+max_tokens: 128000
+read_cost: 0.15
+write_cost: 0.6
+concurrent_requests: 16
+human_readable_id: GPT OSS 120B (high)
+n_gpus: 2
+system_prompt: |
+  You are ChatGPT, a large language model trained by OpenAI.
+date: "2025-08-05"
+tokenizer_kwargs:
+  reasoning_effort: high
+  model_identity: You are OpenAI GPT OSS.
