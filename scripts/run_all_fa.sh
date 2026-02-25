@@ -9,16 +9,14 @@ COMPS=(
   "brumo/brumo_2025"
   "cmimc/cmimc_2025"
   "apex/shortlist_2025"
-  "arxiv/december"
-  "arxiv/january"
+  "arxiv/all"
 )
 
 # Per-comp n overrides
 declare -A N_VALUES=(
   ["apex/apex_2025"]=16
   # add more overrides here if needed
-  ["arxiv/december"]=8
-  ["arxiv/january"]=8
+  ["arxiv/all"]=8
 )
 
 for comp in "${COMPS[@]}"; do
