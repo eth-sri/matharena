@@ -1,5 +1,5 @@
 model: models/gdm-eval-model-bcn
-human_readable_id: Gemini Deep Think 3
+human_readable_id: Gemini Deep Think 3 (12/25)
 api: google
 concurrent_requests: 1
 read_cost: 1.25

@@ -1,0 +1,21 @@
+model: gemini-3.1-pro-preview
+api: google
+temperature: null
+top_p: null
+concurrent_requests: 64
+max_tokens: 65536
+cache_read_cost: 0.2
+read_cost: 2
+tool_choice: auto
+write_cost: 12
+human_readable_id: Gemini 3.1 Pro Preview (low)
+date: "2026-02-19"
+extra_body:
+  extra_body:
+    google:
+      thinking_config:
+        include_thoughts: true
+        thinking_level: low
+other_params:
+  open: false
+  creator: Google

@@ -142,13 +142,14 @@ class CodeRunner:
                 p = self.sandbox.exec(
                     "bash", "-c", f"g++ {filename} -o {filename}.out && ./{filename}.out", timeout=exec_timeout
                 )
-                time_end = time.time()
+                
                 self.n_exec += 1
 
                 output = {
                     "stdout": p.stdout.read(),
                     "stderr": p.stderr.read(),
                 }
+                time_end = time.time()
                 output["time"] = time_end - time_start
                 return output
             except Exception as e:
@@ -180,6 +181,7 @@ class DockerCodeRunner:
             tty=True,
             cpu_count=self.cpus,
             mem_limit=f"{self.memory}g",
+            network_mode="none",
         )
 
     @staticmethod

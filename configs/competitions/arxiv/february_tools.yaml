@@ -1,0 +1,171 @@
+instruction: |
+  You are given a difficult, research-level mathematics question. Your task is to solve the problem.
+  The question is written in such a way that it solely requires you to find the final answer. Make sure to follow the additional formatting instructions if they are provided in the question.
+  Put the final answer you find within \\boxed{{}}.
+
+  Your are given access to tools that allow you to search for academic papers, read their content, and extract relevant information.
+  In particular, you can search the Semantic Scholar database, which contains millions of research papers across various fields and allows you to search through them using a semantic search API.
+  You can, but are not required to, use these tools to help you find the final answer.
+  Each tool has a maximum number of calls you can make:
+  - read_paper: 5
+  - read_pages: 20
+  - find_in_paper: 20
+  - query_semantic_scholar: 20
+  - execute_code: 10
+  You have to stay within these limits while solving the problem.
+
+  # Semantic Scholar Query Guidelines
+
+  Use these instructions when generating or refining queries for Semantic Scholar to maximize relevance and coverage in mathematical literature searches.
+
+  ## Query Formulation
+
+  1. Express queries as **concise concept phrases**, not full questions.  
+  2. Prefer **standard mathematical terminology** and canonical names.  
+  3. Use **quotation marks for exact phrases** (e.g., named theorems or methods).  
+  4. Avoid Boolean operators (AND, OR, NOT) and special syntax, as they are not supported.  
+  5. If a concept has multiple common names, try **separate queries for each variant**.  
+
+  ## Query Strategy
+
+  6. Start broad with the main concept, then iteratively refine using terminology found in top results.  
+  7. Combine **mathematical object + technique/property** to increase precision.  
+  8. When relevant, search by **theorem, conjecture, equation, or framework names**.  
+  9. Use author queries to explore a research program or school of thought.  
+
+  ## Result Refinement
+
+  10. Inspect abstracts to extract additional keywords for follow-up searches.  
+  11. Use citation and reference links to identify foundational and influential papers.  
+
+  ## Query Design Heuristics
+
+  12. Prefer specificity over length; adding unrelated terms reduces ranking quality.  
+  13. Run multiple focused queries instead of one complex query.  
+  14. Re-query when shifting goals (survey vs. specific result vs. technique discovery).  
+
+  ---
+
+  ## Examples
+
+  ### Core concept search
+  spectral gap expander graphs
+
+  ### Named result
+  "Szemerédi regularity lemma"
+
+  ### Object + technique
+  optimal transport Wasserstein gradient flows
+
+  ### Variant terminology
+  navier stokes regularity  
+  navier-stokes existence uniqueness
+
+  ### Narrow problem
+  KPZ equation weak solutions
+
+  # Other Guidelines
+  - Internet is disabled via the code tool, do not attempt to use it to access the internet.
+  - Prefer read_page and find_in_paper to explore a paper first; reading the entire paper can pollute your context window with irrelevant information. Only read the full paper if it is really relevant.
+  
+strict_parsing: false
+n_problems: 32
+date: "2026-02-01"
+max_tool_calls:
+  read_paper: 5
+  read_pages: 10
+  find_in_paper: 10
+  query_semantic_scholar: 10
+  execute_code: 10
+dataset_path: data/arxiv/february
+tools:
+- tool_spec:
+    function:
+      description: | 
+        Queries Semantic Scholar API with the given query string and returns a list of relevant papers including their titles, abstracts, and IDs.
+        Also tells you whether a PDF is available for each paper.
+      name: query_semantic_scholar
+      parameters:
+        properties:
+          query:
+            description: The search query string.
+            type: string
+        required:
+        - query
+        type: object
+    type: function
+- tool_spec:
+    function:
+      description: | 
+        Reads the full content of the paper with the given paper ID (from Semantic Scholar) and returns it as markdown text.
+      name: read_paper
+      parameters:
+        properties:
+          paper_id:
+            description: The unique identifier of the paper to read.
+            type: string
+        required:
+        - paper_id
+        type: object
+    type: function
+- tool_spec:
+    function:
+      description: | 
+        Reads specific pages from the paper with the given paper ID (from Semantic Scholar) and returns the content as markdown text.
+      name: read_pages
+      parameters:
+        properties:
+          paper_id:
+            description: The unique identifier of the paper to read.
+            type: string
+          min_page:
+            description: The starting page number (1-indexed).
+            type: integer
+          max_page:
+            description: The ending page number (1-indexed, inclusive).
+            type: integer
+        required:
+        - paper_id
+        type: object
+    type: function
+- tool_spec:
+    function:
+      description: | 
+        Runs a Ctrl+F style search for the given string within the paper with the given paper ID (from Semantic Scholar) and returns the first 10 matching content.
+      name: find_in_paper
+      parameters:
+        properties:
+          paper_id:
+            description: The unique identifier of the paper to read.
+            type: string
+          string:
+            description: The string to search for within the paper.
+            type: string
+        required:
+        - paper_id
+        - string
+        type: object
+    type: function
+- tool_spec:
+    function:
+      description: 'Executes the code in the given language and returns the standard
+        output and standard error. Your code is always executed as a self-contained
+        script, and it does not have access to the previously executed code blocks!
+        If you use python, your code will be run in an environment with the following
+        libraries installed: pandas, numpy, scikit-learn, sympy, gmpy2'
+      name: execute_code
+      parameters:
+        properties:
+          code:
+            description: The self-contained code to execute
+            type: string
+          lang:
+            description: The programming language of the code (python or cpp)
+            type: string
+        required:
+        - code
+        - lang
+        type: object
+    type: function
+  tool_spec_gdm:
+    name: code_execution

@@ -4,3 +4,4 @@ n_problems: 3
 date: "2024-03-12"
 final_answer: false
 dataset_path: MathArena/usamo_2024
+judge_config: judges/judge

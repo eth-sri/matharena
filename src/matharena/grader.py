@@ -10,7 +10,7 @@ from loguru import logger
 from matharena.tools.submit_answer import check_hash_match
 
 from matharena.utils import is_conversation_broken
-from matharena.parser import WarningType, check_answers, extract_answer, parse_answer
+from matharena.parser import WarningType, check_answers, extract_answer, extract_boxed_answer, parse_answer
 
 
 def extract_numbers(text):
@@ -149,18 +149,21 @@ def extract_and_grade(messages, output_tokens, gold_answer, competition_config, 
 
     is_final_answer = competition_config.get("final_answer", True)
     use_strict_parsing = competition_config.get("strict_parsing", False)
+    use_exact_match = competition_config.get("exact_match_parsing", False)
 
     gold_answer_is_list = is_final_answer and "," in gold_answer
-    typed_gold_answer, _ = parse_answer(gold_answer, list_answer=gold_answer_is_list)
 
     is_broken, reason = is_conversation_broken(messages)
     if is_broken:
         raise ValueError(f"Message list is broken: {reason}")
 
     last_message = messages[-1]["content"]
-    model_answer, warning = extract_answer(
-        last_message, strict_parsing=use_strict_parsing, parse=True, list_answer=gold_answer_is_list
-    )
+    if use_exact_match:
+        model_answer, warning = extract_boxed_answer(last_message, list_answer=gold_answer_is_list)
+    else:
+        model_answer, warning = extract_answer(
+            last_message, strict_parsing=use_strict_parsing, parse=True, list_answer=gold_answer_is_list
+        )
 
     if gold_answer.startswith("hash:"):
         hval = gold_answer.split(":")[1]
@@ -169,13 +172,32 @@ def extract_and_grade(messages, output_tokens, gold_answer, competition_config, 
         else:
             return model_answer, False, warning.value
 
-    is_correct = check_answers(model_answer, typed_gold_answer)
+    if use_exact_match:
+        gold_is_int = re.fullmatch(r"\s*-?\d+\s*", str(gold_answer)) is not None
+
+        def _normalize_exact_match(s):
+            normalized = s.lower()
+            if gold_is_int:
+                normalized = re.sub(r"[a-z]", "", normalized)
+                normalized = re.sub(r"[^0-9-]+", "", normalized)
+            else:
+                normalized = re.sub(r"[^a-z0-9]+", "", normalized)
+            return normalized
+
+        if model_answer is None:
+            is_correct = False
+        else:
+            is_correct = _normalize_exact_match(str(model_answer)) == _normalize_exact_match(str(gold_answer))
+    else:
+        typed_gold_answer, _ = parse_answer(gold_answer, list_answer=gold_answer_is_list)
+        is_correct = check_answers(model_answer, typed_gold_answer)
+
     if not is_correct and check_output_length(output_tokens):
         logger.warning(
             f"[{debug_info}] Model output length {output_tokens} is of the form 10**k * 2**n. This might indicate it hit the token limit."
         )
         warning = WarningType.MINOR  # model just didn't have time, any error could have been caused by this
-    elif not is_correct and check_all_numbers(last_message, gold_answer):
+    elif not is_correct and not use_exact_match and check_all_numbers(last_message, gold_answer):
         logger.warning(
             f"[{debug_info}] Model answer: {model_answer} is not equal to gold answer: {gold_answer} even though model output contains the gold answer."
         )

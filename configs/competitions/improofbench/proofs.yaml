@@ -1,7 +1,8 @@
 instruction: |
   {problem}
 strict_parsing: false
-n_problems: 49
+n_problems: 51
 date: "2200-07-15"
 final_answer: false
 dataset_path: null
+judge_config: judges/judge

@@ -13,3 +13,4 @@ other_params:
   creator: Z.ai
   parameters: 355
   active_parameters: 32
+  huggingface_id: zai-org/GLM-4.5

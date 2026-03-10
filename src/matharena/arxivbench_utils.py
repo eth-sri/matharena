@@ -54,16 +54,16 @@ def list_paper_ids(paper_root):
     return sorted(paper_ids)
 
 
-def load_annotation(paper_root, paper_id):
-    path = os.path.join(paper_root, paper_id, "llm_annotation.json")
+def load_annotation(paper_root, paper_id, annotation_filename="llm_annotation.json"):
+    path = os.path.join(paper_root, paper_id, annotation_filename)
     if not os.path.isfile(path):
         return {}
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def save_annotation(paper_root, paper_id, data):
-    path = os.path.join(paper_root, paper_id, "llm_annotation.json")
+def save_annotation(paper_root, paper_id, data, annotation_filename="llm_annotation.json"):
+    path = os.path.join(paper_root, paper_id, annotation_filename)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, sort_keys=True)
 
@@ -102,6 +102,70 @@ def _try_json_loads(value):
         return json.loads(value)
     except json.JSONDecodeError:
         return None
+
+
+def _repair_invalid_json_backslashes(text):
+    valid_escapes = {'"', "\\", "/", "b", "f", "n", "r", "t"}
+    out = []
+    in_string = False
+    idx = 0
+    while idx < len(text):
+        ch = text[idx]
+        if not in_string:
+            out.append(ch)
+            if ch == '"':
+                in_string = True
+            idx += 1
+            continue
+
+        if ch == '"':
+            out.append(ch)
+            in_string = False
+            idx += 1
+            continue
+
+        if ch == "\\":
+            if idx + 1 >= len(text):
+                out.append("\\\\")
+                idx += 1
+                continue
+            nxt = text[idx + 1]
+            if nxt in valid_escapes:
+                out.append(ch)
+                out.append(nxt)
+                idx += 2
+                continue
+            if nxt == "u":
+                hex_digits = text[idx + 2:idx + 6]
+                if len(hex_digits) == 4 and all(c in "0123456789abcdefABCDEF" for c in hex_digits):
+                    out.append(text[idx:idx + 6])
+                    idx += 6
+                    continue
+            out.append("\\\\")
+            out.append(nxt)
+            idx += 2
+            continue
+
+        if ch == "\n":
+            out.append("\\n")
+        elif ch == "\r":
+            out.append("\\r")
+        elif ch == "\t":
+            out.append("\\t")
+        else:
+            out.append(ch)
+        idx += 1
+    return "".join(out)
+
+
+def _try_json_loads_with_repair(value):
+    parsed = _try_json_loads(value)
+    if parsed is not None:
+        return parsed
+    repaired = _repair_invalid_json_backslashes(value)
+    if repaired == value:
+        return None
+    return _try_json_loads(repaired)
 
 
 def _iter_string_literals(text):
@@ -157,20 +221,20 @@ def _find_json_fragment(text):
 def _parse_nested_json(value):
     if not isinstance(value, str):
         return None
-    parsed = _try_json_loads(value)
+    parsed = _try_json_loads_with_repair(value)
     if parsed is not None:
         return parsed
     decoded = _decode_json_escapes(value)
     if decoded is None:
         return None
-    return _try_json_loads(decoded)
+    return _try_json_loads_with_repair(decoded)
 
 
 def extract_json(text):
     text = text.strip()
     if not text:
         return None
-    parsed = _try_json_loads(text)
+    parsed = _try_json_loads_with_repair(text)
     if parsed is not None:
         if isinstance(parsed, dict):
             nested = _parse_nested_json(parsed.get("raw"))
@@ -183,12 +247,12 @@ def extract_json(text):
         return parsed
     fragment = _find_json_fragment(text)
     if fragment:
-        parsed = _try_json_loads(fragment)
+        parsed = _try_json_loads_with_repair(fragment)
         if parsed is not None:
             return parsed
         decoded = _decode_json_escapes(fragment)
         if decoded is not None:
-            parsed = _try_json_loads(decoded)
+            parsed = _try_json_loads_with_repair(decoded)
             if parsed is not None:
                 return parsed
     for literal in _iter_string_literals(text):
@@ -200,10 +264,16 @@ def extract_json(text):
         logger.warning(f"Failed to extract JSON from text that mentions JSON. {text}")
     return None
 
-def get_latest_pair(annotation):
+def get_latest_fields(annotation, fields):
     review = annotation.get("review") or {}
-    question = review.get("question") or annotation.get("question")
-    answer = review.get("answer") or annotation.get("answer")
-    if not question or not answer:
-        return None, None
-    return str(question).strip(), str(answer).strip()
+    values = []
+    for field in fields:
+        value = review.get(field) or annotation.get(field)
+        if not value:
+            return None
+        values.append(str(value).strip())
+    return tuple(values)
+
+
+def get_latest_pair(annotation):
+    return get_latest_fields(annotation, ["question", "answer"])

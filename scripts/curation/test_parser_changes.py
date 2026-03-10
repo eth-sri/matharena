@@ -19,7 +19,7 @@ if __name__ == "__main__":
     # get all yaml files recursively in the competition config folder
     yaml_files = glob.glob(os.path.join(args.competition_configs_folder, "**/*.yaml"), recursive=True)
     for yaml_file in yaml_files:
-        if "improofbench" in yaml_file:
+        if "improofbench" in yaml_file or "bebras" in yaml_file:
             continue
         with open(yaml_file, "r") as f:
             competition_config = yaml.safe_load(f)
@@ -46,6 +46,7 @@ if __name__ == "__main__":
                 extraction, _ = extract_answer(data["messages"][i][-1]['content'], 
                                                competition_config.get("strict_parsing", False), 
                                                True, list_answer)
+
                 check_answer = check_answers(parsed_gold_answer, extraction)
                 if data["correct"][i] != (check_answer == True):
                     logger.error(f"Error in {json_file} for {comp} on problem {i + 1}")

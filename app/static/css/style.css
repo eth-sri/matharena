@@ -260,6 +260,11 @@ h1, h2, h3, h4, h5, h6, summary, p {
   /* Kept light grey */
   border-top: 4px solid #cccccc;
   color: #333333;
+  white-space: normal;
+}
+
+.judgment-content {
+  white-space: pre-wrap;
 }
 
 .response-box {

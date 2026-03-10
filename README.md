@@ -125,6 +125,19 @@ There are several ways to track progress and debug runs:
 
 If issues are found, delete all runs for that problem by deleting the corresponding output file or use `runs.py:drop_runs` for selective removal. After that, call `run.py again` or only repeat the grading using `scripts/regrade.py` as described above. If the parser requires a manual overwrite, you can edit `src/matharena/parse_manual.py` and add a key-value pair mapping the model solution to a parsable solution.
 
+### Adding Runs to the Website
+
+To postprocess results to add them to our website, you should run
+```bash
+bash scripts/website/postprocess.sh path/to/competition
+```
+
+You can test this by running a local instance of the MathArena website via
+```
+cd website
+uv run python3 flaskr/app.py
+```
+
 ### Uploading Answers to HuggingFace
 You can upload the model answers to HuggingFace as follows:
 ```bash
@@ -161,8 +174,10 @@ To add a new model add a config file in the `configs/models` folder. Each config
   - `timeout`: Request timeout in seconds (default: 2000).
   - `max_retries`: Retry attempts to API (default: 50).
   - `read_cost` & `write_cost`: Cost per million tokens in USD for input and output tokens (default: 1 each).
+  - `cache_read_cost`: Cost per million cached input tokens in USD (default: same as `read_cost`).
   - `date`: Release date of the model in the format "yyyy-mm-dd".
   - `batch_processing`: If set to true, the model will be queried using batch processing. Only available for OpenAI and Anthropic models.
+  - `enable_anthropic_prompt_caching`: Enable Anthropic prompt-caching markers (`cache_control`) for Anthropic Messages API calls (default: true).
   - `use_openai_responses_api`: If set to true, will use the OpenAI responses API (instead of chat completions).
   - Other model/provider specific parameters (`config`, `provider`, `reasoning`, etc.).
 
@@ -272,6 +287,12 @@ To compare the spearman correlation between different competitions, run
 ```bash
 uv run python scripts/extraction/rank_correlation.py --comps aime/aime_2025  hmmt/hmmt_feb_2025
 ```
+
+To create a plot of the Pareto-Frontier of model performance vs cost or model release date, run
+```bash
+uv run python scripts/extraction/timeline.py --comps aime/aime_2025  hmmt/hmmt_feb_2025
+```
+Here, specify the `--cost` parameter if you prefer the Pareto-Frontier for cost.
 
 To create a table containing results per category (Combinatorics, Number Theory, ...), run
 ```bash

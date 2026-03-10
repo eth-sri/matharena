@@ -1,0 +1,19 @@
+model: gpt-5.4-pro--xhigh
+api: openai
+max_tokens: 128000
+cache_read_cost: 30
+read_cost: 30
+write_cost: 180
+concurrent_requests: 16
+temperature: null
+top_p: null
+human_readable_id: GPT-5.4-Pro (xhigh)
+batch_processing: false
+background: true
+use_openai_responses_api: true
+date: "2026-03-05"
+reasoning:
+  summary: "auto"
+other_params:
+  open: false
+  creator: OpenAI

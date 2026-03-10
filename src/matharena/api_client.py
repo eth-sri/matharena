@@ -34,18 +34,19 @@ class APIClient:
     def __init__(
         self,
         model,
-        timeout=18000,
+        timeout=30000,
         max_tokens=None,
         api="openai",
         api_key_env=None,
         base_url=None,
-        max_retries=10,
-        max_retries_inner=5,
+        max_retries=3,
+        max_retries_inner=25,
         concurrent_requests=30,
         no_system_messages=False,
         context_limit=None,
         background=False,
         read_cost=1,
+        cache_read_cost=None,
         write_cost=1,
         sleep_on_error=60,
         sleep_after_request=0.1,
@@ -56,7 +57,9 @@ class APIClient:
         batch_processing=False,
         use_openai_responses_api=False,
         use_gdm_tools=False,
+        stream_openai_chat_completions=False,
         max_tool_calls=0,
+        cache_write_cost=0,
         tools=None,
         **kwargs,
     ):
@@ -71,6 +74,7 @@ class APIClient:
             concurrent_requests (int, optional): The number of concurrent requests to make. Defaults to 30.
             no_system_messages (bool, optional): Whether to disable system messages. Defaults to False.
             read_cost (int, optional): The cost of reading a token. Defaults to 1.
+            cache_read_cost (int, optional): The cost of reading a cached input token. Defaults to read_cost.
             write_cost (int, optional): The cost of writing a token. Defaults to 1.
             sleep_on_error (int, optional): The number of seconds to sleep on an error. Defaults to 60.
             sleep_after_request (float, optional): The number of seconds to sleep after a request. Defaults to 0.1.
@@ -79,6 +83,7 @@ class APIClient:
             reasoning_effort (str, optional): The reasoning effort to use. Defaults to None.
             batch_processing (bool, optional): Whether to use batch processing. Defaults to False.
             use_openai_responses_api (bool, optional): Whether to use OpenAI responses. Defaults to False.
+            stream_openai_chat_completions (bool, optional): Whether to stream OpenAI chat completions internally.
             max_tool_calls (int|dict, optional): The maximum number of tool calls to make. Defaults to 0.
                 Could also be a dict that specifies max calls per tool name.
             tools (list, optional): A list of tools to use. Defaults to None.
@@ -111,7 +116,7 @@ class APIClient:
                 max_tokens_param = "max_completion_tokens"
         if use_openai_responses_api and not batch_processing:
             max_tokens_param = "max_output_tokens"
-        if self.tool_calls_allowed and not use_openai_responses_api:
+        if self.tool_calls_allowed and not use_openai_responses_api and not api == "anthropic":
             max_tokens_param = "max_completion_tokens"
         self._kwarg_remover(api, model, kwargs)
 
@@ -119,6 +124,7 @@ class APIClient:
         self.kwargs = kwargs
         self.max_tokens_param = max_tokens_param
         self.context_limit = context_limit
+        self.max_tokens = max_tokens
         if max_tokens is not None:
             self.kwargs[max_tokens_param] = max_tokens
         self.timeout = timeout
@@ -130,11 +136,16 @@ class APIClient:
         self.sleep_on_error = sleep_on_error
         self.sleep_after_request = sleep_after_request
         self.read_cost = read_cost
+        self.cache_read_cost = read_cost if cache_read_cost is None else cache_read_cost
         self.write_cost = write_cost
         self.background = background
         self.batch_processing = batch_processing
         self.use_openai_responses_api = use_openai_responses_api
+        self.use_gdm_tools = use_gdm_tools
+        self.use_google_internal_tools = False
+        self.stream_openai_chat_completions = stream_openai_chat_completions
         self.include_max_tool_calls = include_max_tool_calls
+        self.cache_write_cost = cache_write_cost
         self.background = background
         if max_tokens is not None:
             self.max_tokens_param = max_tokens_param
@@ -214,6 +225,10 @@ class APIClient:
             self.api_key = os.getenv("XAI_API_KEY")
             self.base_url = "https://api.x.ai/v1"
             self.api = "openai"
+        elif self.api == "stepfun":
+            self.api_key = os.getenv("STEPFUN_API_KEY")
+            self.base_url = "https://api.stepfun.ai/v1"
+            self.api = "openai"
         elif self.api == "openai":
             self.api_key = os.getenv("OPENAI_API_KEY")
         elif self.api == "together":
@@ -221,27 +236,17 @@ class APIClient:
             self.base_url = "https://api.together.xyz/v1"
         elif self.api == "google":
             self.api_key = os.getenv("GOOGLE_API_KEY")
-            """
-                NOTE: We generally use google through openai compat
-                with external tools. BCN should be tested with internal
-                ones and this doesn't seem to be possible via compat,
-                so we route to google via requests.
-            """
-            if self.tool_calls_allowed and "gdm-eval-model-bcn" in self.model:
+            if self.tool_calls_allowed and (
+                "gdm-eval-model-bcn" in self.model
+                or self.use_gdm_tools
+            ):
+                self.use_google_internal_tools = True
                 self.api = "google"
-                self.base_url = (
-                    "https://generativelanguage.googleapis.com/v1beta/models/gdm-eval-model-bcn:generateContent"
-                )
+                self.base_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
             else:
                 self.api = "openai"  # !
                 self.base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
         elif self.api == "anthropic":
-            if self.tool_calls_allowed:
-                self.api = "openai"
-                self.base_url = "https://api.anthropic.com/v1/"
-                if "thinking" in self.kwargs:
-                    self.kwargs["extra_body"] = self.kwargs["thinking"]
-                    del self.kwargs["thinking"]
             self.api_key = os.getenv("ANTHROPIC_API_KEY")
         elif self.api == "glm":
             self.api_key = os.getenv("GLM_API_KEY")
@@ -284,10 +289,12 @@ class APIClient:
     class InternalRequestResult:
         """A class to hold the result of a request internally (below run_queries)."""
 
-        def __init__(self, conversation, input_tokens, output_tokens, n_retries=0, time=0):
+        def __init__(self, conversation, input_tokens, output_tokens, cached_input_tokens=0, cached_write_tokens=0, n_retries=0, time=0):
             self.conversation = conversation
             self.input_tokens = input_tokens
             self.output_tokens = output_tokens
+            self.cached_input_tokens = cached_input_tokens
+            self.cached_write_tokens = cached_write_tokens
             self.n_retries = n_retries
             self.time = time
 
@@ -338,8 +345,12 @@ class APIClient:
                     conversation = [m.copy() for m in queries[idx]] + [{"role": "assistant", "content": ""}]
                     result = self.InternalRequestResult(conversation, input_tokens=0, output_tokens=0)
                 detailed_cost = {
-                    "cost": self._get_cost(result.input_tokens, result.output_tokens),
+                    "cost": self._get_cost(
+                        result.input_tokens, result.output_tokens, result.cached_input_tokens, result.cached_write_tokens
+                    ),
                     "input_tokens": result.input_tokens,
+                    "cached_input_tokens": result.cached_input_tokens,
+                    "cached_write_tokens": result.cached_write_tokens,
                     "output_tokens": result.output_tokens,
                     "time": end_time - start_time,
                     "n_retries": result.n_retries,
@@ -366,8 +377,12 @@ class APIClient:
                     conversation = [m.copy() for m in queries[idx]] + [{"role": "assistant", "content": ""}]
                     result = self.InternalRequestResult(conversation, input_tokens=0, output_tokens=0)
                 detailed_cost = {
-                    "cost": self._get_cost(result.input_tokens, result.output_tokens),
+                    "cost": self._get_cost(
+                        result.input_tokens, result.output_tokens, result.cached_input_tokens
+                    ),
                     "input_tokens": result.input_tokens,
+                    "cached_input_tokens": result.cached_input_tokens,
+                    "cached_write_tokens": result.cached_write_tokens,
                     "output_tokens": result.output_tokens,
                     "n_retries": result.n_retries,
                     "time": time.time() - start_time,
@@ -449,8 +464,59 @@ class APIClient:
                 query_prepared[-1]["content"] = new_content
         return query_prepared
 
-    def _get_cost(self, input_tokens, output_tokens):
-        return (input_tokens * self.read_cost + output_tokens * self.write_cost) / 1e6
+    def _usage_to_dict(self, usage):
+        if usage is None:
+            return {}
+        if isinstance(usage, dict):
+            return usage
+        if hasattr(usage, "model_dump"):
+            return usage.model_dump()
+        return {}
+
+    def _extract_usage_tokens(self, usage):
+        usage_dict = self._usage_to_dict(usage)
+        input_tokens = usage_dict.get("input_tokens", usage_dict.get("prompt_tokens", 0)) or 0
+        output_tokens = usage_dict.get("output_tokens")
+        if output_tokens is None:
+            completion_tokens = usage_dict.get("completion_tokens")
+            if completion_tokens is not None and "total_tokens" not in usage_dict:
+                output_tokens = completion_tokens
+            else:
+                total_tokens = usage_dict.get("total_tokens")
+                output_tokens = (total_tokens - input_tokens) if total_tokens is not None else 0
+
+        input_details = usage_dict.get("input_tokens_details", {})
+        if not isinstance(input_details, dict):
+            input_details = self._usage_to_dict(input_details)
+        prompt_details = usage_dict.get("prompt_tokens_details", {})
+        if not isinstance(prompt_details, dict):
+            prompt_details = self._usage_to_dict(prompt_details)
+
+        cached_input_tokens = (
+            usage_dict.get("cached_input_tokens")
+            or usage_dict.get("cache_read_input_tokens")
+            or input_details.get("cached_tokens")
+            or prompt_details.get("cached_tokens")
+            or 0
+        )
+        if usage_dict.get("cache_read_input_tokens"):
+            input_tokens += cached_input_tokens  # if cache_read_input_tokens is provided, Anthropic doesn't count those in input_tokens, so we add them back for consistency with other APIs.
+
+        cached_input_tokens = min(max(cached_input_tokens, 0), max(input_tokens, 0))
+        cached_creation_input_tokens = usage_dict.get("cache_creation_input_tokens", 0)
+        return input_tokens, output_tokens, cached_input_tokens, cached_creation_input_tokens
+
+    def _get_cost(self, input_tokens, output_tokens, cached_input_tokens=0, cached_creation_input_tokens=0):
+        input_tokens = max(input_tokens, 0)
+        output_tokens = max(output_tokens, 0)
+        cached_input_tokens = min(max(cached_input_tokens, 0), input_tokens)
+        uncached_input_tokens = input_tokens - cached_input_tokens
+        return (
+            uncached_input_tokens * self.read_cost
+            + cached_input_tokens * self.cache_read_cost
+            + output_tokens * self.write_cost
+            + cached_creation_input_tokens * self.cache_write_cost
+        ) / 1e6
 
     def _get_messages_from_anthropic_content(self, content):
         """Postprocesses the content from an Anthropic API query.
@@ -535,8 +601,9 @@ class APIClient:
             inp = getattr(out, "n_input_tokens", 0)
             outp = getattr(out, "n_output_tokens", 0)
             detailed_cost = {
-                "cost": self._get_cost(inp, outp),
+                "cost": self._get_cost(inp, outp, cached_input_tokens=0),
                 "input_tokens": inp,
+                "cached_input_tokens": 0,
                 "output_tokens": outp,
                 "n_retries": 0,
                 "time": time_end - time_start if idx == 0 else 0,  # put all in first since batch
@@ -637,9 +704,15 @@ class APIClient:
                 try:
                     content = result["response"]["body"]["choices"][0]["message"]["content"]
                     conversation = [m.copy() for m in queries[index]] + [{"role": "assistant", "content": content}]
-                    input_tokens = result["response"]["body"]["usage"]["prompt_tokens"]
-                    output_tokens = result["response"]["body"]["usage"]["completion_tokens"]
-                    results[index] = self.InternalRequestResult(conversation, input_tokens, output_tokens, n_retries=retry_idx)
+                    usage = result["response"]["body"]["usage"]
+                    input_tokens, output_tokens, cached_input_tokens, _ = self._extract_usage_tokens(usage)
+                    results[index] = self.InternalRequestResult(
+                        conversation,
+                        input_tokens,
+                        output_tokens,
+                        cached_input_tokens=cached_input_tokens,
+                        n_retries=retry_idx,
+                    )
                 except Exception as e:
                     logger.error(f"Error when unpacking batch OpenAI response, will repeat. Exception: {e}")
                     repeat_indices.append(index)
@@ -741,9 +814,18 @@ class APIClient:
             if raw_result.result.type == "succeeded":
                 new_messages = self._get_messages_from_anthropic_content(raw_result.result.message.content)
                 conversation = [m.copy() for m in queries[i]] + new_messages
-                input_tokens = raw_result.result.message.usage.input_tokens
-                output_tokens = raw_result.result.message.usage.output_tokens
-                results.append(self.InternalRequestResult(conversation, input_tokens, output_tokens, n_retries=retry_idx))
+                input_tokens, output_tokens, cached_input_tokens, _ = self._extract_usage_tokens(
+                    raw_result.result.message.usage
+                )
+                results.append(
+                    self.InternalRequestResult(
+                        conversation,
+                        input_tokens,
+                        output_tokens,
+                        cached_input_tokens=cached_input_tokens,
+                        n_retries=retry_idx,
+                    )
+                )
             else:
                 results.append(None)
                 repeat_indices.append(i)
@@ -819,47 +901,354 @@ class APIClient:
             InternalRequestResult or None
         """
         if self.api == "google":
-            assert "bcn" in self.model
-            # TODO make this code nice; for now quick patch:
-            # the only model that does not go to openai compatibility api is bcn
             return self._google_query_with_internal_tools(idx, query)
         if self.api == "openai":
             return self._openai_query_with_tools(idx, query, ignore_tool_calls=ignore_tool_calls)
         elif self.api == "together":
             return self._openai_query_with_tools(idx, query, is_together=True, ignore_tool_calls=ignore_tool_calls)
         elif self.api == "anthropic":
-            return self._anthropic_query(idx, query)
+            return self._anthropic_query_with_tools(idx, query, ignore_tool_calls=ignore_tool_calls)
         elif self.api == "openrouter":
             return self._openai_query_with_tools(idx, query)
 
     def _anthropic_query(self, idx, query):
-        """Queries the Anthropic API.
+        """Backward-compatible wrapper; Anthropic now uses one unified Messages API path."""
+        return self._anthropic_query_with_tools(idx, query, ignore_tool_calls=True)
 
-        Args:
-            idx (int): The index of the query in the batch of queries given to run_queries.
-            query (MessageList): The query to run.
+    def _anthropic_tool_descriptions(self):
+        anthropic_tools = []
+        for tool_desc in self.tool_descriptions:
+            if tool_desc.get("type") == "function" and "function" in tool_desc:
+                fn = tool_desc["function"]
+                anthropic_tools.append(
+                    {
+                        "name": fn["name"],
+                        "description": fn.get("description", ""),
+                        "input_schema": fn.get("parameters", {"type": "object", "properties": {}}),
+                    }
+                )
+            elif "name" in tool_desc and "input_schema" in tool_desc:
+                anthropic_tools.append(tool_desc)
+            else:
+                logger.warning(f"Skipping unsupported Anthropic tool descriptor: {tool_desc}")
+        return anthropic_tools
 
-        Returns:
-            InternalRequestResult or None
-        """
+    def _to_anthropic_content_blocks(self, content):
+        def _safe_text_block(text, cache_control=None):
+            if text is None:
+                return None
+            text_str = str(text)
+            if text_str.strip() == "":
+                return None
+            block = {"type": "text", "text": text_str}
+            if cache_control is not None:
+                block["cache_control"] = cache_control
+            return block
+
+        if isinstance(content, str):
+            block = _safe_text_block(content)
+            return [] if block is None else [block]
+        if isinstance(content, dict):
+            content = [content]
+        if not isinstance(content, list):
+            block = _safe_text_block(content)
+            return [] if block is None else [block]
+
+        out = []
+        for block in content:
+            if not isinstance(block, dict):
+                text_block = _safe_text_block(block)
+                if text_block is not None:
+                    out.append(text_block)
+                continue
+            block_type = block.get("type", "")
+            if block_type in ["text", "input_text", "output_text"] and "text" in block:
+                mapped = _safe_text_block(block.get("text", ""), cache_control=block.get("cache_control", None))
+                if mapped is not None:
+                    out.append(mapped)
+            elif block_type in ["image", "tool_use", "tool_result"]:
+                out.append(block)
+            else:
+                # Preserve known structured blocks; otherwise avoid introducing invalid empty text blocks.
+                if "text" in block:
+                    mapped = _safe_text_block(block.get("text", ""), cache_control=block.get("cache_control", None))
+                    if mapped is not None:
+                        out.append(mapped)
+                else:
+                    out.append(block)
+        return out
+
+    def _append_anthropic_message(self, anthropic_messages, role, content):
+        content_blocks = self._to_anthropic_content_blocks(content)
+        if len(content_blocks) == 0:
+            return
+        if len(anthropic_messages) > 0 and anthropic_messages[-1]["role"] == role:
+            anthropic_messages[-1]["content"].extend(content_blocks)
+        else:
+            anthropic_messages.append({"role": role, "content": content_blocks})
+
+    def _convert_to_anthropic_messages(self, messages):
+        system_message = anthropic.NOT_GIVEN
+        anthropic_messages = []
+
+        for m in self._drop_cot(messages):
+            role = m.get("role", "")
+            if role in ["system", "developer"]:
+                if system_message is anthropic.NOT_GIVEN and len(anthropic_messages) == 0:
+                    system_blocks = self._to_anthropic_content_blocks(m.get("content", ""))
+                    if len(system_blocks) > 0:
+                        system_message = system_blocks
+                else:
+                    self._append_anthropic_message(anthropic_messages, "user", m.get("content", ""))
+                continue
+
+            if role == "user":
+                self._append_anthropic_message(anthropic_messages, "user", m.get("content", ""))
+                continue
+
+            if role == "assistant" and m.get("type", "") in ["function_call", "tool_call"]:
+                tool_use_id = m.get("tool_call_id", m.get("id", m.get("call_id", None)))
+                if tool_use_id is None:
+                    logger.warning(f"Anthropic tool call missing id; skipping block: {m}")
+                    continue
+                arguments = m.get("arguments", {})
+                if isinstance(arguments, str):
+                    try:
+                        arguments = json.loads(arguments)
+                    except json.JSONDecodeError:
+                        arguments = {"raw": arguments}
+                self._append_anthropic_message(
+                    anthropic_messages,
+                    "assistant",
+                    [
+                        {
+                            "type": "tool_use",
+                            "id": tool_use_id,
+                            "name": m.get("tool_name", m.get("name", "")),
+                            "input": arguments,
+                        }
+                    ],
+                )
+                continue
+
+            if role == "assistant" and m.get("tool_calls", None):
+                for tc in m["tool_calls"]:
+                    fn = tc.get("function", {})
+                    arguments = fn.get("arguments", {})
+                    if isinstance(arguments, str):
+                        try:
+                            arguments = json.loads(arguments)
+                        except json.JSONDecodeError:
+                            arguments = {"raw": arguments}
+                    self._append_anthropic_message(
+                        anthropic_messages,
+                        "assistant",
+                        [
+                            {
+                                "type": "tool_use",
+                                "id": tc.get("id"),
+                                "name": fn.get("name", ""),
+                                "input": arguments,
+                            }
+                        ],
+                    )
+                continue
+
+            if role in ["tool", "tool_response", "function_call_output"] or m.get("type", "") == "function_call_output":
+                tool_use_id = m.get("tool_call_id", m.get("id", m.get("call_id", None)))
+                if tool_use_id is None:
+                    logger.warning(f"Anthropic tool response missing tool_call_id; converting to user text: {m}")
+                    self._append_anthropic_message(anthropic_messages, "user", m.get("content", m.get("output", "")))
+                    continue
+                self._append_anthropic_message(
+                    anthropic_messages,
+                    "user",
+                    [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tool_use_id,
+                            "content": m.get("content", m.get("output", "")),
+                        }
+                    ],
+                )
+                continue
+
+            if role == "assistant":
+                if m.get("content", None) is None:
+                    continue
+                self._append_anthropic_message(anthropic_messages, "assistant", m.get("content", ""))
+            elif role != "":
+                self._append_anthropic_message(anthropic_messages, "user", m.get("content", ""))
+
+        return system_message, anthropic_messages
+
+    def _anthropic_query_with_tools(self, idx, messages, ignore_tool_calls=False):
         client = anthropic.Anthropic(
             api_key=self.api_key,
             max_retries=0,
             timeout=self.timeout,
         )
-        system_message = anthropic.NOT_GIVEN
-        if query[0]["role"] == "system":
-            system_message = query[0]["content"]
-            query = query[1:]
-        raw_result = client.messages.create(
-            model=self.model, messages=self._drop_cot(query), system=system_message, **self.kwargs
-        )
 
-        new_messages = self._get_messages_from_anthropic_content(raw_result.content)
-        conversation = [m.copy() for m in query] + new_messages
-        input_tokens = raw_result.usage.input_tokens
-        output_tokens = raw_result.usage.output_tokens
-        return self.InternalRequestResult(conversation, input_tokens, output_tokens)
+        if ignore_tool_calls:
+            max_tool_calls_mode, max_tool_calls = "total", {"any": 0}
+        else:
+            max_tool_calls_mode, max_tool_calls = self.max_tool_calls_mode, self.max_tool_calls
+        total_max_tool_calls = sum(max_tool_calls.values())
+        if max_tool_calls_mode == "total":
+            nb_executed_tool_calls = {"any": 0}
+        else:
+            nb_executed_tool_calls = {t: 0 for t in self.tool_functions.keys()}
+
+        conversation = [m.copy() for m in messages]
+        system_message, anthropic_messages = self._convert_to_anthropic_messages(conversation)
+        anthropic_tools = self._anthropic_tool_descriptions()
+
+        input_tokens = 0
+        output_tokens = 0
+        cached_input_tokens = 0
+        cached_write_tokens = 0
+        total_retries = 0
+
+        while not self.terminated:
+            response = None
+            n_retries = -1
+            while response is None and n_retries < self.max_retries_inner:
+                n_retries += 1
+                try:
+                    payload = {"model": self.model, "messages": anthropic_messages, **self.kwargs}
+                    if system_message is not anthropic.NOT_GIVEN:
+                        payload["system"] = system_message
+                    if len(anthropic_tools) > 0:
+                        payload["tools"] = anthropic_tools
+                    if ignore_tool_calls:
+                        payload["tool_choice"] = {"type": "none"}
+                    ts = time.strftime("%m%d-%H:%M:%S", time.localtime(time.time()))
+                    ts += f".{datetime.now().microsecond:06d}"
+                    info = {"nb_executed_tool_calls": nb_executed_tool_calls, "n_retries": n_retries}
+                    request_logger.log_request(ts=ts, batch_idx=idx, request=payload, **info)
+                    response = client.messages.create(**payload)
+                    request_logger.log_response(ts=ts, batch_idx=idx, response=response.model_dump())
+                except Exception as e:
+                    if "rate limit" not in str(e).lower() and "429" not in str(e):
+                        total_retries += 1
+                    request_logger.log_response(ts=ts, batch_idx=idx, response={"exception": str(e)})
+                    logger.error(f"Got Anthropic error in tools inner loop. Exception: {e}")
+                    time.sleep(60)
+                    continue
+            if response is None:
+                raise ValueError("Max inner retries reached.")
+
+            step_input, step_output, step_cached_input, step_write_cache = self._extract_usage_tokens(response.usage)
+            input_tokens += step_input
+            output_tokens += step_output
+            cached_input_tokens += step_cached_input
+            cached_write_tokens += step_write_cache
+
+            assistant_blocks = []
+            text_blocks = []
+            tool_uses = []
+            for block in response.content:
+                block_dict = block.model_dump() if hasattr(block, "model_dump") else block
+                if isinstance(block_dict, dict):
+                    assistant_blocks.append(block_dict)
+                block_type = getattr(block, "type", block_dict.get("type", "") if isinstance(block_dict, dict) else "")
+                if block_type == "text":
+                    text_blocks.append(getattr(block, "text", block_dict.get("text", "")))
+                elif block_type == "thinking":
+                    conversation.append({"role": "assistant", "type": "cot", "content": getattr(block, "thinking", "")})
+                elif block_type == "tool_use":
+                    tool_uses.append(block)
+
+            if len(text_blocks) > 0:
+                conversation.append({"role": "assistant", "content": "\n\n".join(text_blocks)})
+            if len(assistant_blocks) > 0:
+                self._append_anthropic_message(anthropic_messages, "assistant", assistant_blocks)
+
+            if len(tool_uses) == 0:
+                break
+            if total_max_tool_calls <= sum(nb_executed_tool_calls.values()):
+                break
+
+            tool_result_blocks = []
+            for tool_use in tool_uses:
+                tool_name = getattr(tool_use, "name", "")
+                tool_id = getattr(tool_use, "id", None)
+                arguments = getattr(tool_use, "input", {})
+                output = ""
+
+                if tool_name not in self.tool_functions:
+                    output = f"Error: Tool {tool_name} not found."
+                    logger.warning(output)
+                else:
+                    tool_key = "any" if max_tool_calls_mode == "total" else tool_name
+                    if nb_executed_tool_calls[tool_key] >= max_tool_calls[tool_key]:
+                        output = f"Error: Tool call after exceeding max # of tool calls ({max_tool_calls[tool_key]})."
+                    else:
+                        tool_func = self.tool_functions[tool_name]
+                        try:
+                            output = tool_func(**arguments)
+                        except Exception as e:
+                            logger.error(f"Error executing tool {tool_name}. Exception: {e}")
+                            output = f"Error executing tool {tool_name}. Exception: {e}"
+                        if isinstance(output, tuple):
+                            output, additional_cost = output
+                            input_tokens += additional_cost["input_tokens"]
+                            output_tokens += additional_cost["output_tokens"]
+                        nb_executed_tool_calls[tool_key] += 1
+
+                nb_tool_calls_left = max_tool_calls.get("any", 0) - nb_executed_tool_calls.get("any", 0)
+                if max_tool_calls_mode != "total":
+                    nb_tool_calls_left = max_tool_calls.get(tool_name, 0) - nb_executed_tool_calls.get(tool_name, 0)
+                detail = "for this tool" if max_tool_calls_mode == "per_tool" else "(across all tools)"
+                info = f"\n\n### INFO ###\nYou have {nb_tool_calls_left} tool executions left {detail}."
+                if not self.include_max_tool_calls:
+                    info = ""
+
+                output_str = output if isinstance(output, str) else str(output)
+                conversation.append(
+                    {
+                        "role": "assistant",
+                        "type": "function_call",
+                        "id": tool_id,
+                        "name": tool_name,
+                        "arguments": arguments,
+                    }
+                )
+                conversation.append(
+                    {
+                        "role": "tool",
+                        "tool_name": tool_name,
+                        "tool_call_id": tool_id,
+                        "content": output_str + info,
+                    }
+                )
+                tool_result_blocks.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": output_str + info,
+                    }
+                )
+
+            if len(tool_result_blocks) == 0:
+                break
+            self._append_anthropic_message(anthropic_messages, "user", tool_result_blocks)
+
+            if total_max_tool_calls <= sum(nb_executed_tool_calls.values()):
+                break
+        
+        if output_tokens == self.max_tokens and (conversation[-1].get("content", "") == "\n\n" or conversation[-1].get("content", "") == "\n"):
+            conversation[-1]["content"] = "Model reached its max allowed token limit. \\boxed{None}"
+        elif len(conversation) == len(messages):
+            conversation.append({"role": "assistant", "content": ""})
+        return self.InternalRequestResult(
+            conversation,
+            input_tokens,
+            output_tokens,
+            cached_input_tokens=cached_input_tokens,
+            cached_write_tokens=cached_write_tokens,
+            n_retries=total_retries,
+        )
 
     def _openai_query_with_tools(self, idx, query, is_together=False, ignore_tool_calls=False):
         """Queries the OpenAI API with tools.
@@ -919,6 +1308,7 @@ class APIClient:
         conversation = [m.copy() for m in messages]
         input_tokens = 0
         output_tokens = 0
+        cached_input_tokens = 0
         total_retries = 0
 
         for _ in range(total_max_tool_calls + 1):
@@ -958,15 +1348,17 @@ class APIClient:
                     if "rate limit" not in str(e).lower() and "429" not in str(e):
                         total_retries += 1
                     request_logger.log_response(ts=ts, batch_idx=idx, response={"exception": str(e)})
-                    time.sleep(20)
+                    time.sleep(60)
                     logger.error(f"Got OpenAI error in responses api inner. Exception: {e}")
                     continue
             if response is None:
                 raise ValueError("Max inner retries reached.")
 
             # Update state: token counts and conversation (potentially execute tool calls)
-            input_tokens += response.usage.input_tokens
-            output_tokens += response.usage.output_tokens
+            step_input, step_output, step_cached_input, _ = self._extract_usage_tokens(response.usage)
+            input_tokens += step_input
+            output_tokens += step_output
+            cached_input_tokens += step_cached_input
 
             was_tool_call_executed = False
             for out in response.output:
@@ -1059,10 +1451,18 @@ class APIClient:
             # If nothing was run this was the last iteration, stop
             if not was_tool_call_executed or self.terminated:
                 break
-
+        
+        if conversation[-1].get("type", "") == "reasoning":
+            raise ValueError("Conversation ended with reasoning block.")
         if len(conversation) == len(messages):
             conversation.append({"role": "assistant", "content": ""})
-        return self.InternalRequestResult(conversation, input_tokens, output_tokens, n_retries=total_retries)
+        return self.InternalRequestResult(
+            conversation,
+            input_tokens,
+            output_tokens,
+            cached_input_tokens=cached_input_tokens,
+            n_retries=total_retries,
+        )
 
     def _openai_query_chat_completions_api(self, client, idx, messages, ignore_tool_calls=False):
         """Queries the OpenAI API using chat completions API.
@@ -1076,6 +1476,8 @@ class APIClient:
         Returns:
             InternalRequestResult or None
         """
+        if self.stream_openai_chat_completions:
+            return self._openai_query_chat_completions_streaming(client, idx, messages)
 
         # Set up tools
         if ignore_tool_calls:
@@ -1092,6 +1494,7 @@ class APIClient:
         conversation = [m.copy() for m in messages]
         input_tokens = 0
         output_tokens = 0
+        cached_input_tokens = 0
         total_retries = 0
         max_output_tokens = self.kwargs.get(self.max_tokens_param, None)
 
@@ -1135,14 +1538,16 @@ class APIClient:
                                 f"Got OpenAI CC max context length error. Reducing max output tokens to {max_output_tokens} and retrying. Exception: {e}"
                             )
                         logger.info(f"Got OpenAI CC non ratelimit error. Sleeping for 20 seconds: {e}")
-                        time.sleep(20)
+                        time.sleep(60)
                         continue
             if response is None:
                 raise ValueError("Max inner retries reached.")
 
             # Update state: token counts and conversation (potentially execute tool calls)
-            input_tokens += response.usage.prompt_tokens
-            output_tokens += response.usage.total_tokens - response.usage.prompt_tokens
+            step_input, step_output, step_cached_input, _ = self._extract_usage_tokens(response.usage)
+            input_tokens += step_input
+            output_tokens += step_output
+            cached_input_tokens += step_cached_input
             message = response.choices[0].message
             if self.context_limit is not None:
                 max_output_tokens = self.context_limit
@@ -1179,12 +1584,6 @@ class APIClient:
 
             message_dict = message.model_dump()
             message_dict = {k: v for k, v in message_dict.items() if v is not None}  # Drop nulls
-            if "reasoning" in message_dict:
-                del message_dict["reasoning"]
-            if "reasoning_content" in message_dict and "deepseek" not in self.model.lower():
-                del message_dict["reasoning_content"]
-            if "reasoning_details" in message_dict:
-                pass  # Models that have this like to also have it back so it's kept, as "type":"cot" blocks get filtered out before the API. Normalize_conversation does the opposite: ignores this but keeps clean "cot" blocks.
             conversation.append(message_dict)  # Should have tool calls inside too; and reasoning_details
 
             # Try to execute all tool calls
@@ -1243,14 +1642,132 @@ class APIClient:
         if total_max_tool_calls > 0:
             logger.info(f"Finished on a loop without tool calls, after executing {nb_executed_tool_calls} calls total.")
 
-        return self.InternalRequestResult(conversation, input_tokens, output_tokens, n_retries=total_retries)
+        return self.InternalRequestResult(
+            self.clean_cot_from_conversation(conversation),
+            input_tokens,
+            output_tokens,
+            cached_input_tokens=cached_input_tokens,
+            n_retries=total_retries,
+        )
+
+    def _openai_query_chat_completions_streaming(self, client, idx, messages):
+        """Queries the OpenAI API using chat completions API with streaming.
+
+        Tool calls are ignored in streaming mode; we only aggregate the final text.
+        """
+        conversation = [m.copy() for m in messages]
+        input_tokens = 0
+        output_tokens = 0
+        cached_input_tokens = 0
+        total_retries = 0
+        max_output_tokens = self.kwargs.get(self.max_tokens_param, None)
+
+        response = None
+        n_retries = -1
+        while response is None and n_retries < self.max_retries_inner:
+            n_retries += 1
+            try:
+                kwargs = self.kwargs.copy()
+                kwargs[self.max_tokens_param] = max_output_tokens
+                payload = {
+                    "model": self.model,
+                    "messages": self._drop_cot(conversation),
+                    "timeout": self.timeout,
+                    "stream": True,
+                    "stream_options": {"include_usage": True},
+                    **kwargs,
+                }
+                ts = time.strftime("%m%d-%H:%M:%S", time.localtime(time.time()))
+                ts += f".{datetime.now().microsecond:06d}"
+                request_logger.log_request(ts=ts, batch_idx=idx, request=payload, n_retries=n_retries)
+                response = client.chat.completions.create(**payload)
+            except Exception as e:
+                if "rate limit" not in str(e).lower() and "429" not in str(e):
+                    total_retries += 1
+                request_logger.log_response(ts=ts, batch_idx=idx, response={"exception": str(e)})
+                if isinstance(e, RateLimitError):
+                    logger.info(f"Got OpenAI CC rate limit error. Sleeping for 60 seconds. Exception: {e}")
+                    time.sleep(60)
+                    continue
+                if "maximum context length" in str(e).lower() or "input token count" in str(e).lower():
+                    if max_output_tokens is not None:
+                        max_output_tokens = max_output_tokens // 2
+                        logger.info(
+                            f"Got OpenAI CC max context length error. Reducing max output tokens to {max_output_tokens} and retrying. Exception: {e}"
+                        )
+                logger.info(f"Got OpenAI CC non ratelimit error. Sleeping for 20 seconds: {e}")
+                time.sleep(60)
+                continue
+        if response is None:
+            raise ValueError("Max inner retries reached.")
+
+        text_parts = []
+        reasoning_parts = []
+        final_usage = None
+        for event in response:
+            if getattr(event, "usage", None) is not None:
+                final_usage = event.usage
+            if not getattr(event, "choices", None):
+                continue
+            delta = event.choices[0].delta
+            if getattr(delta, "content", None):
+                text_parts.append(delta.content)
+            if getattr(delta, "reasoning", None):
+                reasoning_parts.append(delta.reasoning)
+
+        reasoning = "".join(reasoning_parts)
+        if reasoning:
+            conversation.append({"role": "assistant", "type": "cot", "content": reasoning})
+        content = "".join(text_parts)   
+        conversation.append({"role": "assistant", "content": content})
+
+        if final_usage is not None:
+            input_tokens, output_tokens, cached_input_tokens, _ = self._extract_usage_tokens(final_usage)
+
+        request_logger.log_response(
+            ts=ts,
+            batch_idx=idx,
+            response={
+                "streamed": True,
+                "content": content,
+                "reasoning": reasoning,
+                "usage": final_usage.model_dump() if final_usage is not None else None,
+            },
+        )
+
+        return self.InternalRequestResult(
+            conversation,
+            input_tokens,
+            output_tokens,
+            cached_input_tokens=cached_input_tokens,
+            n_retries=total_retries,
+        )
+
+    def clean_cot_from_conversation(self, conversation):
+        """Cleans CoT from conversation for cost saving purposes.
+
+        Args:
+            conversation (list): The conversation to clean.
+        Returns:
+            list: The cleaned conversation.
+        """
+        cleaned_conversation = []
+        for message in conversation:
+            new_message = message.copy()
+            if "reasoning_details" in new_message:
+                del new_message["reasoning_details"]
+            if "reasoning" in new_message:
+                del new_message["reasoning"]
+            if "reasoning_content" in new_message:
+                del new_message["reasoning_content"]
+            cleaned_conversation.append(new_message)
+        return cleaned_conversation
 
     def _google_query_with_internal_tools(self, idx, messages):
         """Queries Google for BCN.
         InternalRequestResult or None
         """
         # NOTE: expect single turn (since internal tool calls) and don't reprompt
-        # TODO implement properly or find a way to use openai compat
         assert len(messages) == 1 and messages[0]["role"] == "user"
 
         conversation = [m.copy() for m in messages]
@@ -1260,10 +1777,37 @@ class APIClient:
             "Content-Type": "application/json",
         }
 
+        function_declarations = []
+        google_tools = []
+        has_web_search = False
+        for tool_desc in self.tool_descriptions:
+            if tool_desc.get("type") == "function" and "function" in tool_desc:
+                fn = tool_desc["function"]
+                function_declarations.append(
+                    {
+                        "name": fn["name"],
+                        "description": fn.get("description", ""),
+                        "parameters": fn.get("parameters", {"type": "object", "properties": {}}),
+                    }
+                )
+            elif tool_desc.get("type") == "web_search":
+                google_tools.append({"googleSearch": {}})
+                has_web_search = True
+            elif "google_search" in tool_desc:
+                google_tools.append({"googleSearch": tool_desc["google_search"]})
+                has_web_search = True
+            else:
+                google_tools.append(tool_desc)
+                if "googleSearch" in tool_desc:
+                    has_web_search = True
+        if function_declarations:
+            google_tools.append({"functionDeclarations": function_declarations})
+
         payload = {
-            "contents": [{"role": "user", "parts": {"text": messages[0]["content"]}}],
-            "tools": self.tool_descriptions,
+            "contents": [{"role": "user", "parts": [{"text": messages[0]["content"]}]}],
         }
+        if google_tools:
+            payload["tools"] = google_tools
 
         ts = time.strftime("%m%d-%H:%M:%S", time.localtime(time.time()))
         ts += f".{datetime.now().microsecond:06d}"
@@ -1283,7 +1827,8 @@ class APIClient:
         if "candidates" not in json_response:
             raise Exception(f"Error: {json_response}")
 
-        message = json_response["candidates"][0]["content"]
+        candidate = json_response["candidates"][0]
+        message = candidate["content"]
         parts = message["parts"]
         role = message["role"]
         assert role == "model"
@@ -1303,7 +1848,8 @@ class APIClient:
 
         mode = None
         buffer = ""
-        # TODO: We will log these as external tool call now for speed, transpile later
+        if has_web_search and candidate.get("groundingMetadata"):
+            conversation.append({"role": "assistant", "type": "web_search_call", "query": messages[0]["content"]})
         for part in parts:
             if "thought" in part and part["thought"]:
                 if mode != "cot":

@@ -4,6 +4,7 @@ temperature: null
 top_p: null
 concurrent_requests: 32
 max_tokens: 250000
+cache_read_cost: 0.2
 read_cost: 2
 tool_choice: auto
 write_cost: 12

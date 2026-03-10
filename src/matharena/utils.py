@@ -166,7 +166,7 @@ def normalize_conversation(messages):
                 cm["content"] = m.get("query", "")
             else:
                 cm["code"] = m.get("code", m.get("content", None))
-            check_for_extra_keys(m, ["role", "content", "type", "id", "container_id", "tool_name", "code", "outputs"])
+            check_for_extra_keys(m, ["role", "content", "type", "id", "container_id", "tool_name", "code", "outputs", "query"])
             clean_messages.append(cm)
             continue
 

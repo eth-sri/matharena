@@ -12,3 +12,4 @@ other_params:
   creator: DeepSeek
   parameters: 671
   active_parameters: 37
+  huggingface_id: deepseek-ai/DeepSeek-V3.1-Terminus

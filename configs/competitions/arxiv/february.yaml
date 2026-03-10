@@ -1,0 +1,8 @@
+instruction: |
+  You are given a difficult question. Your task is to solve the problem.
+  The question is written in such a way that it solely requires you to find the final answer. Make sure to follow the additional formatting instructions if they are provided in the question.
+  Put the final answer you find within \\boxed{{}}.
+strict_parsing: false
+n_problems: 32
+date: "2026-02-01"
+dataset_path: MathArena/arxivmath-0226

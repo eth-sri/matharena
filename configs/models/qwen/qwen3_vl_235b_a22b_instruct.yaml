@@ -18,3 +18,4 @@ other_params:
   creator: Qwen
   parameters: 235
   active_parameters: 22
+  huggingface_id: Qwen/Qwen3-VL-235B-A22B-Instruct

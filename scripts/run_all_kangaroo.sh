@@ -8,10 +8,8 @@ COMPS=(
   "kangaroo/kangaroo_2025_9-10"
 )
 
-for comp in "${COMPS[@]}"; do
-  echo "Running on $comp with model $MODEL"
-  uv run python3 scripts/run.py \
-    --comp "$comp" \
-    --n 4 \
-    --models "$MODEL"
-done
+echo "Running on comps: ${COMPS[*]} with model $MODEL"
+uv run python3 scripts/run.py \
+  --comp "${COMPS[@]}" \
+  --n 4 \
+  --models "$MODEL"

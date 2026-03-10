@@ -12,3 +12,4 @@ other_params:
   creator: DeepSeek
   parameters: 70
   active_parameters: 70
+  huggingface_id: deepseek-ai/DeepSeek-R1-Distill-Llama-70B

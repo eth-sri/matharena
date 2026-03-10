@@ -16,7 +16,23 @@
     <h3 style="text-align: left;">Problem: {{ problem_name }} {{ ticks }}</h3>
 
     <div class="marked box problem-box">{% if problem_statement %}{{ problem_statement }}{% endif %}{% if img_path %}<img src="{{ img_path }}" class="problem-image">{% endif %}</div>
-    <div class="marked box solution-box">{{ solution }}</div>
+    {% if is_final_answer %}
+        <div class="marked box solution-box">{{ solution | trim }}</div>
+    {% else %}
+        <p class="strong">Grading Scheme:</p>
+        <div class="box judgment-box"><div class="marked judgment-content">{{- (grading_scheme_text if grading_scheme_text else "No grading scheme found.") | trim -}}</div></div>
+        <p class="strong">Ground-Truth Proofs:</p>
+        {% if ground_truth_proofs and ground_truth_proofs|length > 0 %}
+            {% for proof in ground_truth_proofs %}
+                <details class="judgment-details">
+                    <summary><span class="strong">Proof {{ loop.index }}</span></summary>
+                    <div class="box judgment-box"><div class="marked judgment-content">{{- proof | trim -}}</div></div>
+                </details>
+            {% endfor %}
+        {% else %}
+            <div class="box judgment-box">No ground-truth proofs found.</div>
+        {% endif %}
+    {% endif %}
 
     {% for instance in instances %}
         <div class="fake-hr"></div>
@@ -51,17 +67,43 @@
         <details class="response-box-details strong" id="{{ instance.conversation_id }}">
             <summary>[Run {{ instance.run }}] Conversation:</summary>
         </details>
-        <p class="strong">[Run {{ instance.run }}] Parsed Answer ({{ instance.verdict }}, {{ instance.warnings }} warnings):</p>
-        <div class="box answer-box {{ instance.correct_cls }}">{{ instance.answer }}</div>
-        <form method="post" action="{{ url_for('override_result', model=model, problem_name=problem_id, run_idx=instance.run) }}" class="override-form">
-            <label for="manual-correct-{{ instance.run }}">Manual override:</label>
-            <select id="manual-correct-{{ instance.run }}" name="manual_correct">
-                <option value="auto" {% if instance.manual_value == "auto" %}selected{% endif %}>Auto</option>
-                <option value="correct" {% if instance.manual_value == "correct" %}selected{% endif %}>Correct</option>
-                <option value="incorrect" {% if instance.manual_value == "incorrect" %}selected{% endif %}>Incorrect</option>
-            </select>
-            <button type="submit">Save</button>
-        </form>
+        {%- if is_final_answer -%}
+            <p class="strong">[Run {{ instance.run }}] Parsed Answer ({{ instance.verdict }}, {{ instance.warnings }} warnings):</p>
+            <div class="box answer-box {{ instance.correct_cls }}">{{ instance.answer | trim }}</div>
+            <form method="post" action="{{ url_for('override_result', model=model, problem_name=problem_id, run_idx=instance.run) }}" class="override-form">
+                <label for="manual-correct-{{ instance.run }}">Manual override:</label>
+                <select id="manual-correct-{{ instance.run }}" name="manual_correct">
+                    <option value="auto" {% if instance.manual_value == "auto" %}selected{% endif %}>Auto</option>
+                    <option value="correct" {% if instance.manual_value == "correct" %}selected{% endif %}>Correct</option>
+                    <option value="incorrect" {% if instance.manual_value == "incorrect" %}selected{% endif %}>Incorrect</option>
+                </select>
+                <button type="submit">Save</button>
+            </form>
+        {%- else -%}
+            <p class="strong">[Run {{ instance.run }}] Judge Output ({{ instance.verdict }}):</p>
+            {%- if instance.judgments and instance.judgments|length > 0 -%}
+                {%- for judgment in instance.judgments -%}
+                    <details class="judgment-details">
+                        <summary><span class="strong">Judge {{ judgment.judge_idx }}: {{ judgment.points }}/{{ judgment.max_points }}</span></summary>
+                        {%- if judgment.error -%}
+                            <div class="box judgment-box incorrect"><div class="marked judgment-content">{{- judgment.error | trim -}}</div></div>
+                        {%- endif -%}
+                        {%- if judgment.details and judgment.details|length > 0 -%}
+                            {%- for detail in judgment.details -%}
+                                <div class="box judgment-box">
+                                    <p class="strong">{{ detail.title }}{% if detail.points is defined and detail.max_points is defined %} ({{ detail.points }}/{{ detail.max_points }}){% endif %}</p>
+                                    <div class="marked judgment-content">{{- detail.desc | trim -}}</div>
+                                </div>
+                            {%- endfor -%}
+                        {%- else -%}
+                            <div class="box judgment-box">No grader details available.</div>
+                        {%- endif -%}
+                    </details>
+                {%- endfor -%}
+            {%- else -%}
+                <div class="box judgment-box">No judgments available for this run.</div>
+            {%- endif -%}
+        {%- endif %}
     {% endfor %}
 
     {% if boxes_expanded %}

@@ -13,3 +13,4 @@ other_params:
   creator: DeepSeek
   parameters: 32
   active_parameters: 32
+  huggingface_id: deepseek-ai/DeepSeek-R1-Distill-Qwen-32B

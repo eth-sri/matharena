@@ -3,48 +3,42 @@ DEFAULT_N=4
 
 COMPS=(
   "aime/aime_2025"
+  "aime/aime_2026"
+  "hmmt/hmmt_feb_2026"
   "hmmt/hmmt_feb_2025"
   "hmmt/hmmt_nov_2025"
   "smt/smt_2025"
   "brumo/brumo_2025"
   "cmimc/cmimc_2025"
   "apex/shortlist_2025"
-  "arxiv/all"
+  "arxiv/december"
+  "arxiv/january"
+  "arxiv/february"
+  "apex/apex_2025"
 )
 
 # Per-comp n overrides
 declare -A N_VALUES=(
   ["apex/apex_2025"]=16
   # add more overrides here if needed
-  ["arxiv/all"]=8
+  ["arxiv/december"]=4
+  ["arxiv/january"]=4
 )
 
+COMP_N_OVERRIDES=()
 for comp in "${COMPS[@]}"; do
-  N=${N_VALUES[$comp]:-$DEFAULT_N}
-
-  echo "Running on $comp with model $MODEL (n=$N)"
-
-  python scripts/run.py \
-    --comp "$comp" \
-    --models "$MODEL" \
-    --n "$N"
-
-  python scripts/check.py \
-    --comp "$comp" \
-    --model-config gemini/gemini-3-flash-low
+  if [[ -n "${N_VALUES[$comp]}" ]]; then
+    COMP_N_OVERRIDES+=("${comp}=${N_VALUES[$comp]}")
+  fi
 done
 
-# Run apex/apex_2025 separately (still supports override)
-APEX_COMP="apex/apex_2025"
-APEX_N=${N_VALUES[$APEX_COMP]:-$DEFAULT_N}
-
-echo "Running on $APEX_COMP with model $MODEL (n=$APEX_N)"
-
+echo "Running on comps: ${COMPS[*]} with model $MODEL (default n=$DEFAULT_N, overrides: ${COMP_N_OVERRIDES[*]})"
 python scripts/run.py \
-  --comp "$APEX_COMP" \
+  --comp "${COMPS[@]}" \
   --models "$MODEL" \
-  --n "$APEX_N"
+  --n "$DEFAULT_N" \
+  --comp-n "${COMP_N_OVERRIDES[@]}"
 
-python scripts/check.py \
-  --comp "$APEX_COMP" \
-  --model-config gemini/gemini-3-flash-low
+for comp in "${COMPS[@]}"; do
+  python scripts/curation/check.py  --comp "$comp" --model-config gemini/gemini-3-flash-low
+done

@@ -1,0 +1,6 @@
+instruction: "Put your final answer within \\boxed{{}}.\nThe answer is an integer between 0 and 999 inclusive."
+strict_parsing: false
+n_problems: 30
+date: "2026-02-06"
+dataset_path: MathArena/aime_2026
+huggingface_id: MathArena/aime_2026

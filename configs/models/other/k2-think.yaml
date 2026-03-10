@@ -13,3 +13,4 @@ other_params:
   creator: MBZUAI
   parameters: 32
   active_parameters: 32
+  huggingface_id: LLM360/K2-Think

@@ -1,0 +1,10 @@
+This PR adds a new MathArena evaluation result so it can be indexed on the model leaderboard page.
+
+Model: {model_huggingface_id}
+Competition dataset id: {competition_huggingface_id}
+Score: {score}
+Result file: {result_file_path}
+
+The results are the same as the ones displayed on [our webpage](https://matharena.ai/?view=problem&comp={comp_id}).
+
+Note: this is an experimental feature, we are currently trying to make this work as smooth as possible.

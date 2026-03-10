@@ -124,6 +124,8 @@ if __name__ == "__main__":
             logger.info(f"Saved dataset locally to {args.local_save_path}")
         else:
             logger.info(f"Uploading dataset with {len(df)} samples to dataset {args.repo_name} in org {args.org}")
+            if "history" in df.columns:
+                df = df.drop(columns=["history"])
             dataset = Dataset.from_pandas(df)
             dataset.push_to_hub(
                 os.path.join(args.org, args.repo_name),

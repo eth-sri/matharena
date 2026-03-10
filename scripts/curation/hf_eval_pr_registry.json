@@ -1,0 +1,124 @@
+{
+  "entries": {
+    "Qwen/Qwen3.5-397B-A17B::aime/aime_2026::.eval_results/MathArena--aime_2026.yaml": {
+      "commit_url": "https://huggingface.co/Qwen/Qwen3.5-397B-A17B/commit/aa452f4b8bc9d667981dd47a0ef1c9feed14abb7",
+      "competition_huggingface_id": "MathArena/aime_2026",
+      "competition_name": "aime/aime_2026",
+      "created_at": "2026-02-23T12:16:23.321758+00:00",
+      "date": "2026-02-23",
+      "eval_result_path": ".eval_results/MathArena--aime_2026.yaml",
+      "model_config_path": "qwen/qwen3.5_397b",
+      "model_huggingface_id": "Qwen/Qwen3.5-397B-A17B",
+      "pr_url": "https://huggingface.co/Qwen/Qwen3.5-397B-A17B/discussions/47",
+      "score": 93.33
+    },
+    "Qwen/Qwen3.5-397B-A17B::hmmt/hmmt_feb_2026::.eval_results/MathArena--hmmt_feb_2026.yaml": {
+      "commit_url": "https://huggingface.co/Qwen/Qwen3.5-397B-A17B/commit/23acf761f661a7193d6702f87d54e3c1e0d095e6",
+      "competition_huggingface_id": "MathArena/hmmt_feb_2026",
+      "competition_name": "hmmt/hmmt_feb_2026",
+      "created_at": "2026-02-25T16:22:45.813213+00:00",
+      "date": "2026-02-25",
+      "eval_result_path": ".eval_results/MathArena--hmmt_feb_2026.yaml",
+      "model_config_path": "qwen/qwen3.5_397b",
+      "model_huggingface_id": "Qwen/Qwen3.5-397B-A17B",
+      "pr_url": "https://huggingface.co/Qwen/Qwen3.5-397B-A17B/discussions/53",
+      "score": 87.88
+    },
+    "deepseek-ai/DeepSeek-V3.2::aime/aime_2026::.eval_results/MathArena--aime_2026.yaml": {
+      "commit_url": "https://huggingface.co/deepseek-ai/DeepSeek-V3.2/commit/19add1a247f917e3f1d35fa4d2aeb4bfd332bc6d",
+      "competition_huggingface_id": "MathArena/aime_2026",
+      "competition_name": "aime/aime_2026",
+      "created_at": "2026-02-18T22:43:11.420855+00:00",
+      "date": "2026-02-18",
+      "eval_result_path": ".eval_results/MathArena--aime_2026.yaml",
+      "model_config_path": "deepseek/deepseek_v32_dec",
+      "model_huggingface_id": "deepseek-ai/DeepSeek-V3.2",
+      "pr_url": "https://huggingface.co/deepseek-ai/DeepSeek-V3.2/discussions/44",
+      "score": 94.17
+    },
+    "deepseek-ai/DeepSeek-V3.2::hmmt/hmmt_feb_2026::.eval_results/MathArena--hmmt_feb_2026.yaml": {
+      "commit_url": "https://huggingface.co/deepseek-ai/DeepSeek-V3.2/commit/3f34031a9bad5bc7789b0cb6b459ac6cf9130c37",
+      "competition_huggingface_id": "MathArena/hmmt_feb_2026",
+      "competition_name": "hmmt/hmmt_feb_2026",
+      "created_at": "2026-02-23T12:16:36.061269+00:00",
+      "date": "2026-02-23",
+      "eval_result_path": ".eval_results/MathArena--hmmt_feb_2026.yaml",
+      "model_config_path": "deepseek/deepseek_v32_dec",
+      "model_huggingface_id": "deepseek-ai/DeepSeek-V3.2",
+      "pr_url": "https://huggingface.co/deepseek-ai/DeepSeek-V3.2/discussions/46",
+      "score": 84.09
+    },
+    "moonshotai/Kimi-K2.5::aime/aime_2026::.eval_results/MathArena--aime_2026.yaml": {
+      "commit_url": "https://huggingface.co/moonshotai/Kimi-K2.5/commit/d725679df7d86fb5e52bbc462c6995a0a054f9e7",
+      "competition_huggingface_id": "MathArena/aime_2026",
+      "competition_name": "aime/aime_2026",
+      "created_at": "2026-02-18T22:43:05.835894+00:00",
+      "date": "2026-02-18",
+      "eval_result_path": ".eval_results/MathArena--aime_2026.yaml",
+      "model_config_path": "moonshot/k25",
+      "model_huggingface_id": "moonshotai/Kimi-K2.5",
+      "pr_url": "https://huggingface.co/moonshotai/Kimi-K2.5/discussions/88",
+      "score": 95.83
+    },
+    "moonshotai/Kimi-K2.5::hmmt/hmmt_feb_2026::.eval_results/MathArena--hmmt_feb_2026.yaml": {
+      "commit_url": "https://huggingface.co/moonshotai/Kimi-K2.5/commit/909c0e21b2bd340b0caadf4b095bf3eddd56a8f1",
+      "competition_huggingface_id": "MathArena/hmmt_feb_2026",
+      "competition_name": "hmmt/hmmt_feb_2026",
+      "created_at": "2026-02-23T12:16:28.525152+00:00",
+      "date": "2026-02-23",
+      "eval_result_path": ".eval_results/MathArena--hmmt_feb_2026.yaml",
+      "model_config_path": "moonshot/k25",
+      "model_huggingface_id": "moonshotai/Kimi-K2.5",
+      "pr_url": "https://huggingface.co/moonshotai/Kimi-K2.5/discussions/95",
+      "score": 87.12
+    },
+    "stepfun-ai/Step-3.5-Flash::aime/aime_2026::.eval_results/MathArena--aime_2026.yaml": {
+      "commit_url": "https://huggingface.co/stepfun-ai/Step-3.5-Flash/commit/bf34d44788fe175c313a4cd8753172787a7410b2",
+      "competition_huggingface_id": "MathArena/aime_2026",
+      "competition_name": "aime/aime_2026",
+      "created_at": "2026-02-16T09:56:11.571443+00:00",
+      "date": "2026-02-16",
+      "eval_result_path": ".eval_results/MathArena--aime_2026.yaml",
+      "model_config_path": "stepfun/3.5-flash",
+      "model_huggingface_id": "stepfun-ai/Step-3.5-Flash",
+      "pr_url": "https://huggingface.co/stepfun-ai/Step-3.5-Flash/discussions/26",
+      "score": 96.67
+    },
+    "stepfun-ai/Step-3.5-Flash::hmmt/hmmt_feb_2026::.eval_results/MathArena--hmmt_feb_2026.yaml": {
+      "commit_url": "https://huggingface.co/stepfun-ai/Step-3.5-Flash/commit/6cc5ec71116e0b245090d17cb672a2c73a9b3aa2",
+      "competition_huggingface_id": "MathArena/hmmt_feb_2026",
+      "competition_name": "hmmt/hmmt_feb_2026",
+      "created_at": "2026-02-23T12:16:47.808725+00:00",
+      "date": "2026-02-23",
+      "eval_result_path": ".eval_results/MathArena--hmmt_feb_2026.yaml",
+      "model_config_path": "stepfun/3.5-flash",
+      "model_huggingface_id": "stepfun-ai/Step-3.5-Flash",
+      "pr_url": "https://huggingface.co/stepfun-ai/Step-3.5-Flash/discussions/30",
+      "score": 86.36
+    },
+    "zai-org/GLM-5::aime/aime_2026::.eval_results/MathArena--aime_2026.yaml": {
+      "commit_url": "https://huggingface.co/zai-org/GLM-5/commit/7a3af028aac139d1b6181cd8f4997107a94cf18f",
+      "competition_huggingface_id": "MathArena/aime_2026",
+      "competition_name": "aime/aime_2026",
+      "created_at": "2026-02-18T22:43:17.269042+00:00",
+      "date": "2026-02-18",
+      "eval_result_path": ".eval_results/MathArena--aime_2026.yaml",
+      "model_config_path": "glm/glm-5",
+      "model_huggingface_id": "zai-org/GLM-5",
+      "pr_url": "https://huggingface.co/zai-org/GLM-5/discussions/44",
+      "score": 95.83
+    },
+    "zai-org/GLM-5::hmmt/hmmt_feb_2026::.eval_results/MathArena--hmmt_feb_2026.yaml": {
+      "commit_url": "https://huggingface.co/zai-org/GLM-5/commit/8b93c2bc0cb5bd574a7d8ca3642988101b69a14c",
+      "competition_huggingface_id": "MathArena/hmmt_feb_2026",
+      "competition_name": "hmmt/hmmt_feb_2026",
+      "created_at": "2026-02-23T12:16:44.941870+00:00",
+      "date": "2026-02-23",
+      "eval_result_path": ".eval_results/MathArena--hmmt_feb_2026.yaml",
+      "model_config_path": "glm/glm-5",
+      "model_huggingface_id": "zai-org/GLM-5",
+      "pr_url": "https://huggingface.co/zai-org/GLM-5/discussions/51",
+      "score": 86.36
+    }
+  }
+}

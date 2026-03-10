@@ -18,6 +18,20 @@ class PureModelSolver(BaseSolver):
         super().__init__(solver_config, default_prompt_template, default_api_client_args, last_chance_prompt)
         self.client = APIClient(**default_api_client_args)
 
+    def build_query(self, text: str | None, image_b64):
+        if text is None:
+            text = "See image."
+        prompt = self.default_prompt_template.format(problem=text)
+        if image_b64 is not None:
+            # NOTE: OpenAI format, needs to be mangled inside for Gemini, Grok
+            content = [
+                {"type": "input_text", "text": prompt},
+                {"type": "input_image", "image_url": f"data:image/png;base64,{image_b64}", "detail": "high"},
+            ]
+        else:
+            content = prompt
+        return [{"role": "user", "content": content}]
+
     @override
     def solve_batch(self, stmt_batch: list[tuple[str, Any]], batch_idx_to_problem_idx: dict[int, int], batch_idx_to_run_idx: dict[int, int]):
         """
@@ -34,18 +48,7 @@ class PureModelSolver(BaseSolver):
 
         queries = []
         for text, image_b64 in stmt_batch:
-            if text is None:
-                text = "See image."
-            prompt = self.default_prompt_template.format(problem=text)
-            if image_b64 is not None:
-                # NOTE: OpenAI format, needs to be mangled inside for Gemini, Grok
-                content = [
-                    {"type": "input_text", "text": prompt},
-                    {"type": "input_image", "image_url": f"data:image/png;base64,{image_b64}", "detail": "high"},
-                ]
-            else:
-                content = prompt
-            queries.append([{"role": "user", "content": content}])
+            queries.append(self.build_query(text, image_b64))
         for idx, conversation, detailed_cost in self.client.run_queries(queries):
             # History is None for pure model solver
             yield SolverResponse(idx, conversation, detailed_cost, history=None)
@@ -63,7 +66,11 @@ class PureModelSolver(BaseSolver):
         """
 
         # Run queries but there is only one
-        new_queries = [previous_response.conversation + [{"role": "user", "content": self.last_chance_prompt}]]
+        old_queries = previous_response.conversation
+        if old_queries[-1].get("type") == "cot":
+            old_queries = [old_queries + [{"role": "assistent", "content": ""}]]
+
+        new_queries = [old_queries + [{"role": "user", "content": self.last_chance_prompt}]]
         for idx, conversation, detailed_cost in self.client.run_queries(
             new_queries, no_tqdm=True, ignore_tool_calls=True
         ):

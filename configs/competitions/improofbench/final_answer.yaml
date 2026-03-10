@@ -1,7 +1,7 @@
 instruction: |
   {problem}
 strict_parsing: false
-n_problems: 42
+n_problems: 44
 date: "2200-07-15"
 final_answer: true
 dataset_path: null

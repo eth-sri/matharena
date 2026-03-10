@@ -12,3 +12,4 @@ other_params:
   creator: Qwen
   parameters: 32
   active_parameters: 32
+  huggingface_id: Qwen/QwQ-32B-Preview

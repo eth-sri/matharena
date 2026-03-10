@@ -4,6 +4,7 @@ max_tokens: 256000
 temperature: 1.0 
 concurrent_requests: 32
 read_cost: 0.60
+cache_read_cost: 0.10
 write_cost: 3
 context_limit: 256000
 human_readable_id: Kimi K2.5 (Think)
@@ -19,3 +20,4 @@ other_params:
   creator: Moonshot AI
   parameters: 1000
   active_parameters: 32
+  huggingface_id: moonshotai/Kimi-K2.5

@@ -17,3 +17,4 @@ other_params:
   creator: Meta
   parameters: 128
   active_parameters: 17
+  huggingface_id: meta-llama/Llama-4-Maverick-17B-128E-Instruct

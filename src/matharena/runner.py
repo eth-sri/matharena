@@ -278,11 +278,8 @@ class Runner:
                 progress = "".join(progress)
                 f.write(f"Problem {problem_idx:3}: {progress} ({self.runs_per_problem - problem_runs.N} left)\n")
 
-    def run(self, solver_name):
-        """Run the specified solver (pure_model or agent) on this Runner's competition.
-        Args:
-            solver (str): The name of the solver to use.
-        """
+    def prepare_run(self, solver_name, set_request_metadata=True):
+        """Prepare solver, status files, and pending batch for this competition."""
         solver_config_path = f"{self.solver_configs_dir}/{solver_name}.yaml"
         solver_config = self.load_solver_config(solver_config_path)
         output_dir = f"{self.base_output_dir}/{self.comp_name}/{solver_name}"
@@ -331,7 +328,8 @@ class Runner:
                 batch_idx_to_run_idx[len(batch) - 1] = run_idx
 
         self._update_status(solver_name, all_runs)
-        request_logger.set_metadata(self.comp_name, solver_name, batch_idx_to_problem_idx)
+        if set_request_metadata:
+            request_logger.set_metadata(self.comp_name, solver_name, batch_idx_to_problem_idx)
         logger.info(f"Status file created. Total new runs in the batch sent to solver: {len(batch)}.")
         status_path = os.path.join("logs", "status", f"{self.comp_name}_{solver_name}.txt")
         print(f"Printing initial status from {status_path}.")
@@ -340,10 +338,31 @@ class Runner:
 
         if len(batch) == 0:
             logger.info(f"Nothing to do. All problems have {self.runs_per_problem} runs already.")
-            return
+            return None
 
-        # Let the solver solve; grade each run as it arrives, offer last chances, and update all_runs.
-        for solver_response in solver.solve_batch(batch, batch_idx_to_problem_idx, batch_idx_to_run_idx):
+        return {
+            "solver_name": solver_name,
+            "solver_config": solver_config,
+            "solver": solver,
+            "all_runs": all_runs,
+            "batch": batch,
+            "batch_idx_to_problem_idx": batch_idx_to_problem_idx,
+            "batch_idx_to_run_idx": batch_idx_to_run_idx,
+            "status_path": status_path,
+        }
+
+    def process_solver_responses(
+        self,
+        solver_name,
+        solver,
+        all_runs,
+        batch_idx_to_problem_idx,
+        status_path,
+        solver_responses,
+        print_final_status=True,
+    ):
+        """Grade and save solver responses for an already prepared batch."""
+        for solver_response in solver_responses:
             problem_idx = batch_idx_to_problem_idx[solver_response.idx]
             problem_runs = all_runs[problem_idx]
             debug_info = f"{solver_name} @ P{problem_idx} (ridx={solver_response.idx})"
@@ -417,6 +436,31 @@ class Runner:
                     )
             except Exception as e:
                 logger.opt(exception=True).error(f"[{debug_info}] Error during response analysis, can't add run. {e}")
+        if print_final_status:
+            self.print_final_status(status_path)
+
+    def print_final_status(self, status_path):
         print(f"Done. Printing final status from {status_path}.")
         with open(status_path, "r") as f:
             print(f.read())
+
+    def run(self, solver_name):
+        """Run the specified solver (pure_model or agent) on this Runner's competition.
+        Args:
+            solver (str): The name of the solver to use.
+        """
+        prepared = self.prepare_run(solver_name)
+        if prepared is None:
+            return
+
+        responses = prepared["solver"].solve_batch(
+            prepared["batch"], prepared["batch_idx_to_problem_idx"], prepared["batch_idx_to_run_idx"]
+        )
+        self.process_solver_responses(
+            solver_name=prepared["solver_name"],
+            solver=prepared["solver"],
+            all_runs=prepared["all_runs"],
+            batch_idx_to_problem_idx=prepared["batch_idx_to_problem_idx"],
+            status_path=prepared["status_path"],
+            solver_responses=responses,
+        )

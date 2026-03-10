@@ -3,6 +3,7 @@ api: deepseek
 max_tokens: 64000
 temperature: 1
 top_p: 0.95
+cache_read_cost: 0.028
 read_cost: 0.28
 write_cost: 0.42
 human_readable_id: DeepSeek-v3.2 (Think)
@@ -12,3 +13,4 @@ other_params:
   creator: DeepSeek
   parameters: 671
   active_parameters: 37
+  huggingface_id: deepseek-ai/DeepSeek-V3.2

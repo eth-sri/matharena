@@ -1,6 +1,7 @@
 model: gpt-5.2--high
 api: openai
 max_tokens: 128000
+cache_read_cost: 0.175
 read_cost: 1.75
 write_cost: 14
 concurrent_requests: 32

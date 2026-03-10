@@ -3,9 +3,10 @@ import argparse
 import csv
 import json
 import os
+import math
 
 import yaml
-from flask import Flask, redirect, render_template, url_for, send_from_directory, request, abort
+from flask import Flask, redirect, render_template, url_for, send_from_directory, request, abort, jsonify
 from pyparsing import srange
 from torch import ScriptDict
 
@@ -32,6 +33,11 @@ parser.add_argument(
     "--disable-debug",
     action="store_true",
     help="Disable Flask debug mode.",
+)
+parser.add_argument(
+    "--edit",
+    action="store_true",
+    help="Enable editable dataset page at /edit.",
 )
 args = parser.parse_args()
 
@@ -93,12 +99,196 @@ def load_sources(comp):
     return sources
 
 
+def _format_grading_scheme_text(scheme):
+    if scheme is None:
+        return None
+    if isinstance(scheme, str):
+        return scheme.strip()
+    if isinstance(scheme, list):
+        return "\n".join(
+            f"{i}. [{item.get('points', 0)} pts] {item.get('title', item.get('part_id', f'Part {i}'))}: {item.get('desc', item.get('description', ''))}"
+            for i, item in enumerate(scheme, start=1)
+        ).strip()
+    return json.dumps(scheme, ensure_ascii=False, indent=2)
+
+
+def _extract_ground_truth_proofs(record):
+    proofs = []
+    for key in ["ground_truth_proofs", "ground_truth_proof", "ground_truth_solutions", "ground_truth_solution"]:
+        value = record.get(key)
+        if value is None:
+            continue
+        if isinstance(value, list):
+            proofs.extend(str(x).strip() for x in value if x is not None and str(x).strip())
+        elif str(value).strip():
+            proofs.append(str(value).strip())
+    return proofs
+
+
+def load_grading_records(comp):
+    with open(f"{args.competition_config_folder}/{comp}.yaml", "r", encoding="utf-8") as f:
+        competition_config = yaml.safe_load(f)
+    dataset_path = competition_config.get("dataset_path")
+    if not dataset_path:
+        return {}
+    grading_path = os.path.join(dataset_path, "grading_scheme.json")
+    if not os.path.exists(grading_path):
+        return {}
+    with open(grading_path, "r", encoding="utf-8") as f:
+        rows = json.load(f)
+    return {int(row["id"]): row for row in rows if isinstance(row, dict) and "id" in row}
+
+
+def load_competition_config(comp):
+    with open(f"{args.competition_config_folder}/{comp}.yaml", "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def _scheme_to_raw_text(scheme):
+    if scheme is None:
+        return ""
+    if isinstance(scheme, (list, dict)):
+        return json.dumps(scheme, ensure_ascii=False, indent=4)
+    return str(scheme)
+
+
+def _load_answers_map(dataset_path):
+    answers_path = os.path.join(dataset_path, "answers.csv")
+    if not os.path.exists(answers_path):
+        return {}
+    out = {}
+    with open(answers_path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if "id" not in row:
+                continue
+            out[int(row["id"])] = row.get("answer", "")
+    return out
+
+
+def _load_grading_rows(dataset_path):
+    grading_path = os.path.join(dataset_path, "grading_scheme.json")
+    if not os.path.exists(grading_path):
+        return []
+    with open(grading_path, "r", encoding="utf-8") as f:
+        rows = json.load(f)
+    return rows if isinstance(rows, list) else []
+
+
+def _save_grading_rows(dataset_path, rows):
+    grading_path = os.path.join(dataset_path, "grading_scheme.json")
+    with open(grading_path, "w", encoding="utf-8") as f:
+        json.dump(rows, f, ensure_ascii=False, indent=4)
+
+
+def _extract_gt_list(row):
+    proofs = _extract_ground_truth_proofs(row)
+    return proofs if proofs else []
+
+
+def load_edit_page_data(comp):
+    comp_cfg = load_competition_config(comp)
+    dataset_path = comp_cfg.get("dataset_path")
+    if not dataset_path or not os.path.exists(dataset_path):
+        return {"error": f"Local dataset path not found: {dataset_path}", "items": [], "is_final_answer": True}
+
+    is_final_answer = comp_cfg.get("final_answer", True)
+    problem_ids = set()
+    problems_dir = os.path.join(dataset_path, "problems")
+    if os.path.exists(problems_dir):
+        for name in os.listdir(problems_dir):
+            if name.endswith(".tex") and name[:-4].isdigit():
+                problem_ids.add(int(name[:-4]))
+
+    answers_map = _load_answers_map(dataset_path) if is_final_answer else {}
+    problem_ids.update(answers_map.keys())
+
+    grading_rows = _load_grading_rows(dataset_path) if not is_final_answer else []
+    grading_map = {}
+    for row in grading_rows:
+        if isinstance(row, dict) and "id" in row:
+            pid = int(row["id"])
+            grading_map[pid] = row
+            problem_ids.add(pid)
+
+    items = []
+    for pid in sorted(problem_ids):
+        problem_path = os.path.join(problems_dir, f"{pid}.tex")
+        problem_text = ""
+        if os.path.exists(problem_path):
+            with open(problem_path, "r", encoding="utf-8") as f:
+                problem_text = f.read()
+
+        row = grading_map.get(pid, {})
+        scheme = row.get("scheme", row.get("grading_scheme"))
+        items.append(
+            {
+                "id": pid,
+                "problem_text": problem_text,
+                "final_answer": answers_map.get(pid, "") if is_final_answer else None,
+                "grading_scheme_display": _format_grading_scheme_text(scheme) if not is_final_answer else None,
+                "grading_scheme_raw": _scheme_to_raw_text(scheme) if not is_final_answer else None,
+                "ground_truth_proofs": _extract_gt_list(row) if not is_final_answer else [],
+            }
+        )
+
+    return {"error": None, "items": items, "is_final_answer": is_final_answer, "dataset_path": dataset_path}
+
+
+def _save_problem_text(dataset_path, problem_id, value):
+    problems_dir = os.path.join(dataset_path, "problems")
+    os.makedirs(problems_dir, exist_ok=True)
+    path = os.path.join(problems_dir, f"{problem_id}.tex")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(value)
+
+
+def _save_final_answer(dataset_path, problem_id, value):
+    answers_path = os.path.join(dataset_path, "answers.csv")
+    if not os.path.exists(answers_path):
+        rows = [{"id": str(problem_id), "answer": value}]
+        fieldnames = ["id", "answer"]
+    else:
+        with open(answers_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+            fieldnames = reader.fieldnames or ["id", "answer"]
+        if "id" not in fieldnames:
+            fieldnames = ["id"] + [x for x in fieldnames if x != "id"]
+        if "answer" not in fieldnames:
+            fieldnames.append("answer")
+        found = False
+        for row in rows:
+            if str(row.get("id", "")) == str(problem_id):
+                row["answer"] = value
+                found = True
+                break
+        if not found:
+            rows.append({"id": str(problem_id), "answer": value})
+
+    with open(answers_path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row.get(k, "") for k in fieldnames})
+
+
+def _find_or_create_grading_row(rows, problem_id):
+    for row in rows:
+        if isinstance(row, dict) and str(row.get("id", "")) == str(problem_id):
+            return row
+    row = {"id": str(problem_id), "points": 7, "scheme": "", "ground_truth_proofs": []}
+    rows.append(row)
+    return row
+
+
 # Analyze run
 results = analyze_run(current_comp, args.models)
 boxes_expanded = False
 
 # Get problem names
 sources = load_sources(current_comp)
+grading_records = load_grading_records(current_comp)
 
 app = Flask(__name__)
 
@@ -151,6 +341,17 @@ def get_problem_stats(results, model, problem):
 
 
 def get_tick(is_correct, warning, llm_annotation=None):
+    if isinstance(is_correct, bool):
+        pass
+    elif isinstance(is_correct, (int, float)):
+        if is_correct >= 0.999:
+            return "✅"
+        if is_correct <= 0.001:
+            return "❌"
+        return "🟨"
+    elif isinstance(is_correct, str):
+        return "❔"
+
     if (not is_correct) and llm_annotation is True:
         tick = "🤖"
     elif is_correct:
@@ -256,10 +457,11 @@ def expand(url, expanded):
 @app.route("/refresh/<comp>", defaults={"url": ""})
 @app.route("/refresh/<comp>/<path:url>")
 def refresh(comp, url):
-    global current_comp, results, sources
+    global current_comp, results, sources, grading_records
     current_comp = comp.replace("---", "/")
     results = analyze_run(current_comp, args.models)
     sources = load_sources(current_comp)
+    grading_records = load_grading_records(current_comp)
     print("Refreshed!")
     if not url:
         return redirect(url_for("index"))
@@ -494,6 +696,55 @@ def get_instance_metadata(history_run):
     return {"tool_calls": tool_calls}
 
 
+def _format_score_value(value):
+    if isinstance(value, str):
+        try:
+            value = float(value)
+        except ValueError:
+            return value
+    if isinstance(value, (int, float)):
+        return int(value) if float(value).is_integer() else round(float(value), 4)
+    return value
+
+
+def get_run_judgments(res, run_idx):
+    raw_judgment = res.get("judgment", [])
+    if not isinstance(raw_judgment, list):
+        return []
+
+    # Legacy shape: judgment is a single list of per-run entries.
+    if raw_judgment and all(item is None or isinstance(item, dict) for item in raw_judgment):
+        raw_judgment = [raw_judgment]
+
+    output = []
+    for judge_idx, judge_runs in enumerate(raw_judgment, start=1):
+        if not isinstance(judge_runs, list) or run_idx >= len(judge_runs):
+            continue
+        entry = judge_runs[run_idx]
+        if not isinstance(entry, dict):
+            continue
+        details = []
+        for detail in entry.get("details", []):
+            if not isinstance(detail, dict):
+                continue
+            detail_copy = detail.copy()
+            if "points" in detail_copy:
+                detail_copy["points"] = _format_score_value(detail_copy["points"])
+            if "max_points" in detail_copy:
+                detail_copy["max_points"] = _format_score_value(detail_copy["max_points"])
+            details.append(detail_copy)
+        output.append(
+            {
+                "judge_idx": judge_idx,
+                "points": _format_score_value(entry.get("points")),
+                "max_points": _format_score_value(entry.get("max_points")),
+                "details": details,
+                "error": entry.get("error"),
+            }
+        )
+    return output
+
+
 @app.route("/view/<model>/<problem_name>")
 def problem_view(model, problem_name):
     sidebar_contents = {
@@ -514,12 +765,16 @@ def problem_view(model, problem_name):
         sidebar_contents["problems"][problem_name_for] = {"name": problem_full_name, "ticks": ticks, "class": cls}
 
     res = results[model][int(problem_name)]
+    grading_record = grading_records.get(int(problem_name), {})
     problem_statement = res["problem"]
     img_path = f"/data/{current_comp}/problems/{problem_name}.png"
     if not os.path.exists(img_path[1:]):
         img_path = None
 
-    solution = res["gold_answer"]
+    is_final_answer = res.get("gold_answer", None) is not None
+    solution = res["gold_answer"] if is_final_answer else None
+    grading_scheme_text = _format_grading_scheme_text(grading_record.get("scheme", grading_record.get("grading_scheme")))
+    ground_truth_proofs = _extract_ground_truth_proofs(grading_record)
     instances = []
     llm_annotations = res.get("llm_annotation", [None] * len(res["correct"]))
     manual_overwrite = res.get("manual_overwrite", [False] * len(res["correct"]))
@@ -564,6 +819,7 @@ def problem_view(model, problem_name):
                 "conversation_id": f"{model}>>{problem_name}>>{i}",
                 "metadata": metadata,
                 "manual_value": manual_value,
+                "judgments": get_run_judgments(res, i),
             }
         )
 
@@ -583,8 +839,11 @@ def problem_view(model, problem_name):
         problem_statement=problem_statement,
         img_path=img_path,
         solution=solution,
+        grading_scheme_text=grading_scheme_text,
+        ground_truth_proofs=ground_truth_proofs,
         instances=instances,
         boxes_expanded=boxes_expanded,
+        is_final_answer=is_final_answer,
         is_checkpoint=False,
     )
 
@@ -651,6 +910,101 @@ def override_result(model, problem_name, run_idx):
         results[model][int(problem_name)]["pass_at_1"] = data["pass_at_1"]
 
     return redirect(url_for("problem_view", model=model, problem_name=problem_name))
+
+
+@app.route("/edit")
+def edit_view():
+    if not args.edit:
+        abort(404)
+    data = load_edit_page_data(current_comp)
+    page = max(request.args.get("page", 1, type=int), 1)
+    per_page = 10
+    items = data["items"]
+    total_pages = max(1, math.ceil(len(items) / per_page)) if len(items) > 0 else 1
+    page = min(page, total_pages)
+    start = (page - 1) * per_page
+    end = start + per_page
+    page_items = items[start:end]
+    return render_template(
+        "edit.html",
+        title="MathArena Edit",
+        current_comp=current_comp,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+        has_prev=page > 1,
+        has_next=page < total_pages,
+        prev_page=page - 1,
+        next_page=page + 1,
+        is_final_answer=data["is_final_answer"],
+        items=page_items,
+        error_message=data["error"],
+    )
+
+
+@app.route("/edit/save", methods=["POST"])
+def edit_save():
+    if not args.edit or args.disable_overwrite:
+        abort(403)
+    payload = request.get_json(silent=True) or {}
+    field = payload.get("field")
+    value = payload.get("value", "")
+    problem_id = payload.get("problem_id")
+    proof_idx = payload.get("proof_idx", None)
+
+    if field is None or problem_id is None:
+        return jsonify({"ok": False, "error": "Missing field/problem_id"}), 400
+
+    try:
+        problem_id = int(problem_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid problem_id"}), 400
+
+    comp_cfg = load_competition_config(current_comp)
+    dataset_path = comp_cfg.get("dataset_path")
+    if not dataset_path or not os.path.exists(dataset_path):
+        return jsonify({"ok": False, "error": f"Local dataset path not found: {dataset_path}"}), 400
+
+    if field == "problem":
+        _save_problem_text(dataset_path, problem_id, value)
+    elif field == "final_answer":
+        _save_final_answer(dataset_path, problem_id, value)
+    elif field == "grading_scheme":
+        rows = _load_grading_rows(dataset_path)
+        row = _find_or_create_grading_row(rows, problem_id)
+        stripped = value.strip()
+        parsed = None
+        if stripped.startswith("[") or stripped.startswith("{"):
+            try:
+                parsed = json.loads(value)
+            except Exception:
+                parsed = None
+        row["scheme"] = parsed if parsed is not None else value
+        _save_grading_rows(dataset_path, rows)
+    elif field == "ground_truth_proof":
+        if proof_idx is None:
+            return jsonify({"ok": False, "error": "Missing proof_idx"}), 400
+        try:
+            proof_idx = int(proof_idx)
+        except Exception:
+            return jsonify({"ok": False, "error": "Invalid proof_idx"}), 400
+        rows = _load_grading_rows(dataset_path)
+        row = _find_or_create_grading_row(rows, problem_id)
+        proofs = row.get("ground_truth_proofs", [])
+        if not isinstance(proofs, list):
+            proofs = _extract_ground_truth_proofs(row)
+        while len(proofs) <= proof_idx:
+            proofs.append("")
+        proofs[proof_idx] = value
+        row["ground_truth_proofs"] = proofs
+        _save_grading_rows(dataset_path, rows)
+    else:
+        return jsonify({"ok": False, "error": f"Unsupported field: {field}"}), 400
+
+    global sources, grading_records
+    sources = load_sources(current_comp)
+    grading_records = load_grading_records(current_comp)
+    return jsonify({"ok": True})
 
 
 if __name__ == "__main__":

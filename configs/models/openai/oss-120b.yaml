@@ -12,3 +12,4 @@ other_params:
   creator: OpenAI
   parameters: 117
   active_parameters: 5.1
+  huggingface_id: openai/gpt-oss-120b

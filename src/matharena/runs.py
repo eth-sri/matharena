@@ -332,10 +332,18 @@ class Runs:
 
         self.update_aggregates()
 
-    def update_run_costs(self, idx, new_in_cost, new_out_cost):
+    def update_run_costs(self, idx, new_in_cost, new_out_cost, new_cache_in_cost=None, new_cache_write_cost=None):
         in_toks = self.detailed_costs[idx]["input_tokens"]
         out_toks = self.detailed_costs[idx]["output_tokens"]
-        new_cost = (in_toks * new_in_cost + out_toks * new_out_cost) / 1e6
+        cached_in_toks = self.detailed_costs[idx].get("cached_input_tokens", 0)
+        cached_in_toks = min(max(cached_in_toks, 0), max(in_toks, 0))
+        cached_write_tokens = self.detailed_costs[idx].get("cached_write_tokens", 0)
+        uncached_in_toks = in_toks - cached_in_toks
+        if new_cache_in_cost is None:
+            new_cache_in_cost = new_in_cost
+        if new_cache_write_cost is None:
+            new_cache_write_cost = new_out_cost
+        new_cost = (uncached_in_toks * new_in_cost + cached_in_toks * new_cache_in_cost + out_toks * new_out_cost + cached_write_tokens * new_cache_write_cost) / 1e6
         self.detailed_costs[idx]["cost"] = new_cost
 
         self.update_aggregates()

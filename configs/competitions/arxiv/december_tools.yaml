@@ -13,7 +13,7 @@ instruction: |
   - query_semantic_scholar: 20
   You have to stay within these limits while solving the problem.
 strict_parsing: false
-n_problems: 39
+n_problems: 17
 date: "2025-12-01"
 max_tool_calls:
   read_paper: 5

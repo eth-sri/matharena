@@ -11,7 +11,63 @@ instruction: |
   - read_pages: 20
   - find_in_paper: 20
   - query_semantic_scholar: 20
+  - execute_code: 10
   You have to stay within these limits while solving the problem.
+
+  # Semantic Scholar Query Guidelines
+
+  Use these instructions when generating or refining queries for Semantic Scholar to maximize relevance and coverage in mathematical literature searches.
+
+  ## Query Formulation
+
+  1. Express queries as **concise concept phrases**, not full questions.  
+  2. Prefer **standard mathematical terminology** and canonical names.  
+  3. Use **quotation marks for exact phrases** (e.g., named theorems or methods).  
+  4. Avoid Boolean operators (AND, OR, NOT) and special syntax, as they are not supported.  
+  5. If a concept has multiple common names, try **separate queries for each variant**.  
+
+  ## Query Strategy
+
+  6. Start broad with the main concept, then iteratively refine using terminology found in top results.  
+  7. Combine **mathematical object + technique/property** to increase precision.  
+  8. When relevant, search by **theorem, conjecture, equation, or framework names**.  
+  9. Use author queries to explore a research program or school of thought.  
+
+  ## Result Refinement
+
+  10. Inspect abstracts to extract additional keywords for follow-up searches.  
+  11. Use citation and reference links to identify foundational and influential papers.  
+
+  ## Query Design Heuristics
+
+  12. Prefer specificity over length; adding unrelated terms reduces ranking quality.  
+  13. Run multiple focused queries instead of one complex query.  
+  14. Re-query when shifting goals (survey vs. specific result vs. technique discovery).  
+
+  ---
+
+  ## Examples
+
+  ### Core concept search
+  spectral gap expander graphs
+
+  ### Named result
+  "Szemerédi regularity lemma"
+
+  ### Object + technique
+  optimal transport Wasserstein gradient flows
+
+  ### Variant terminology
+  navier stokes regularity  
+  navier-stokes existence uniqueness
+
+  ### Narrow problem
+  KPZ equation weak solutions
+
+  # Other Guidelines
+  - Internet is disabled via the code tool, do not attempt to use it to access the internet.
+  - Prefer read_page and find_in_paper to explore a paper first; reading the entire paper can pollute your context window with irrelevant information. Only read the full paper if it is really relevant.
+  
 strict_parsing: false
 n_problems: 25
 date: "2026-01-01"
@@ -20,6 +76,7 @@ max_tool_calls:
   read_pages: 10
   find_in_paper: 10
   query_semantic_scholar: 10
+  execute_code: 10
 dataset_path: data/arxiv/january
 tools:
 - tool_spec:
@@ -89,3 +146,26 @@ tools:
         - string
         type: object
     type: function
+- tool_spec:
+    function:
+      description: 'Executes the code in the given language and returns the standard
+        output and standard error. Your code is always executed as a self-contained
+        script, and it does not have access to the previously executed code blocks!
+        If you use python, your code will be run in an environment with the following
+        libraries installed: pandas, numpy, scikit-learn, sympy, gmpy2'
+      name: execute_code
+      parameters:
+        properties:
+          code:
+            description: The self-contained code to execute
+            type: string
+          lang:
+            description: The programming language of the code (python or cpp)
+            type: string
+        required:
+        - code
+        - lang
+        type: object
+    type: function
+  tool_spec_gdm:
+    name: code_execution

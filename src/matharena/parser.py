@@ -473,10 +473,11 @@ def check_answers(ans1, ans2):
         if not (hasattr(ans1, "equals") and callable(ans1.equals)) or not (
             hasattr(ans2, "equals") and callable(ans2.equals)
         ):
-            # do approximate equal here
             if isinstance(ans1, str) or isinstance(ans2, str):
                 # sympy check equality
                 return bool(ans1 == ans2)
+                        
+            # do approximate equal here
             err = abs(N(ans1 - ans2))
             if err < 1e-10 and err / max(abs(N(ans1)), abs(N(ans2))) < 1e-10:
                 return True
@@ -644,6 +645,7 @@ class ParsePrimitive(ParseObject):
                 latex_str = re.sub(r"\\*(?:dfrac|tfrac|frac)\{([^{}]*)\}\{([^{}]*)\}", r"(\1)/(\2)", latex_str)
                 latex_str = re.sub(r"\\*binom\{([^{}]*)\}\{([^{}]*)\}", r"binomial(\1, \2)", latex_str)
                 latex_str = re.sub(r"\\*sqrt\[(.*?)\]\{(.*?)\}", r"(\2)**(1/(\1))", latex_str)
+                latex_str = re.sub(r"\\*sqrt\((\d+)\)\{([^{}]*)\}", r"(\2)**(1/(\1))", latex_str)
                 latex_str = re.sub(r"\\*sqrt\{(.*?)\}", r"(\1)**(1/2)", latex_str)
 
                 latex_str = latex_str.replace("^", "**")
@@ -660,6 +662,7 @@ class ParsePrimitive(ParseObject):
                 latex_str = re.sub(r"\\*(?:dfrac|tfrac|frac)\{([^{}]*)\}\{([^{}]*)\}", r"(\1)/(\2)", latex_str)
                 latex_str = re.sub(r"\\*binom\{([^{}]*)\}\{([^{}]*)\}", r"binomial(\1, \2)", latex_str)
                 latex_str = re.sub(r"\\*sqrt\[(.*?)\]\{(.*?)\}", r"(\2)**(1/(\1))", latex_str)
+                latex_str = re.sub(r"\\*sqrt\((\d+)\)\{([^{}]*)\}", r"(\2)**(1/(\1))", latex_str)
                 latex_str = re.sub(r"\\*sqrt\{(.*?)\}", r"(\1)**(1/2)", latex_str)
 
                 latex_str = latex_str.replace("^", "**")
@@ -693,8 +696,13 @@ class ParsePrimitive(ParseObject):
                 # print complex and real part separately
 
                 try:
+                    simplified = simplify(output_val)
+                    if simplified.is_integer:
+                        return int(simplified), warning
+                    if isinstance(simplified, sympy.Rational):
+                        return simplified, warning
                     float_val = float(N(output_val, 101))
-                    if float_val.is_integer() or float("inf") == float_val or float("-inf") == float_val:
+                    if float("inf") == float_val or float("-inf") == float_val:
                         return int(N(latex2sympy_fixed(string_no_eq), 50001)), warning  # important for large ints
                     return float_val, warning
                 except:  # noqa: E722

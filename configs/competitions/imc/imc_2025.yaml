@@ -14,3 +14,4 @@ n_problems: 10
 date: "2025-07-31"
 final_answer: false
 dataset_path: MathArena/imc_2025
+judge_config: judges/judge

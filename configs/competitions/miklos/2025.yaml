@@ -10,3 +10,4 @@ n_problems: 10
 date: "2025-11-04"
 final_answer: false
 dataset_path: MathArena/miklos_2025
+judge_config: judges/judge

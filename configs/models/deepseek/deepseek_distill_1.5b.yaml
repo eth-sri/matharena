@@ -12,3 +12,4 @@ other_params:
   creator: DeepSeek
   parameters: 1.5
   active_parameters: 1.5
+  huggingface_id: deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B

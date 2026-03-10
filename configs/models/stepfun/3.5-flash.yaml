@@ -1,0 +1,19 @@
+model: step-3.5-flash
+api: stepfun
+max_tokens: 250000
+read_cost: 0.1
+write_cost: 0.3
+human_readable_id: Step 3.5 Flash
+batch_processing: false
+use_openai_responses_api: false
+date: "2026-02-02"
+temperature: 1
+concurrent_requests: 32
+top_p: 1
+stream_openai_chat_completions: true
+other_params:
+  open: true
+  creator: StepFun
+  parameters: 196
+  active_parameters: 11
+  huggingface_id: stepfun-ai/Step-3.5-Flash

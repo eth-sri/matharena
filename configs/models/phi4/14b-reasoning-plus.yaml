@@ -12,3 +12,4 @@ other_params:
   creator: Microsoft
   parameters: 14
   active_parameters: 14
+  huggingface_id: microsoft/Phi-4-reasoning

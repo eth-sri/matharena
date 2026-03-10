@@ -1,4 +1,4 @@
-model: "deepseek-ai/DeepSeek-OCR"
+model: "deepseek-ai/DeepSeek-OCR-2"
 api: custom
 base_url: http://localhost:8000/v1
 max_tokens: 8100

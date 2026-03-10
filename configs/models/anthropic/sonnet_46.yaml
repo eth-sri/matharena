@@ -1,0 +1,23 @@
+model: claude-sonnet-4-6
+api: anthropic
+max_tokens: 128000
+concurrent_requests: 32
+temperature: null
+top_p: null
+cache_write_cost: 6.25
+cache_read_cost: 0.5
+read_cost: 5
+write_cost: 25
+thinking:
+  type: enabled
+  budget_tokens: 5000
+output_config:
+  effort: low
+cache_control:
+  type: ephemeral
+batch_processing: false
+human_readable_id: Claude-Sonnet-4.6 (High)
+date: "2026-02-05"
+other_params:
+  open: false
+  creator: Anthropic

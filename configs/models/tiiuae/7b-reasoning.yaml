@@ -17,3 +17,4 @@ other_params:
   creator: TIIUAE
   parameters: 8
   active_parameters: 8
+  huggingface_id: tiiuae/Falcon-H1R-7B

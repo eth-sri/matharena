@@ -116,9 +116,11 @@ for comp in args.comps:
                     solver_cfg = runner.load_solver_config(solver_config_path)
                     model_config = solver_cfg.get("model_config", {})
                     in_cost = model_config["read_cost"]
+                    cache_in_cost = model_config.get("cache_read_cost", in_cost)
                     out_cost = model_config["write_cost"]
+                    cache_write_cost = model_config.get("cache_write_cost", out_cost)
                     for i in range(runs.N):
-                        runs.update_run_costs(i, in_cost, out_cost)
+                        runs.update_run_costs(i, in_cost, out_cost, cache_in_cost, cache_write_cost)
 
                 # Save
                 logger.info("Saving back to file")

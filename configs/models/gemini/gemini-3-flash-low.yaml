@@ -18,13 +18,3 @@ extra_body:
 other_params:
   open: false
   creator: Google
-
-custom_instructions:
-  aime/aime_2025: "Put your final answer within \\boxed{{}}."
-  hmmt/hmmt_nov_2025: "Put your final answer within \\boxed{{}}."
-  hmmt/hmmt_feb_2025: "Put your final answer within \\boxed{{}}."
-  cmimc/cmimc_2025: "Put your final answer within \\boxed{{}}."
-  smt/smt_2025: "Put your final answer within \\boxed{{}}."
-  brumo/brumo_2025: "Put your final answer within \\boxed{{}}."
-  apex/apex_2025: "Put your final answer within \\boxed{{}}."
-  apex/shortlist_2025: "Put your final answer within \\boxed{{}}."

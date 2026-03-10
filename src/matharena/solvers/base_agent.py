@@ -24,7 +24,7 @@ class BaseAgent:
     """
 
     def __init__(self, batch_idx, problem_idx, run_idx, solver_config, 
-                 default_prompt_template, default_api_client_args):
+                 default_prompt_template=None, default_api_client_args=None):
         self.batch_idx = batch_idx
         self.problem_idx = problem_idx
         self.run_idx = run_idx

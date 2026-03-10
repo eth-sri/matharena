@@ -18,3 +18,4 @@ other_params:
   creator: Moonshot AI
   parameters: 1000
   active_parameters: 32
+  huggingface_id: moonshotai/Kimi-K2-Thinking

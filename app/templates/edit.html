@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="only light">
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <style>
+        .edit-main {
+            width: min(1400px, 95vw);
+            margin: 1.5rem auto;
+        }
+        .edit-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 0.75rem;
+            flex-wrap: wrap;
+        }
+        .edit-meta p {
+            margin: 0.15rem 0;
+        }
+        .edit-back-btn {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.6rem 0.9rem;
+            border-radius: 999px;
+            border: 1px solid #cbd5e1;
+            background: #f8fafc;
+            text-decoration: none;
+            color: #1e293b;
+            font-weight: 600;
+        }
+        .edit-back-btn:hover {
+            background: #eef2ff;
+            border-color: #a5b4fc;
+        }
+        .pager {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+            margin: 0.8rem 0 1.3rem 0;
+            flex-wrap: wrap;
+        }
+        .pager-item {
+            min-width: 2.2rem;
+            height: 2.2rem;
+            padding: 0 0.7rem;
+            border-radius: 999px;
+            border: 1px solid #cbd5e1;
+            background: #ffffff;
+            color: #1e293b;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            box-sizing: border-box;
+        }
+        .pager-item:hover {
+            background: #eef2ff;
+            border-color: #a5b4fc;
+        }
+        .pager-item.active {
+            background: #2563eb;
+            border-color: #2563eb;
+            color: #ffffff;
+        }
+        .pager-item.disabled {
+            opacity: 0.45;
+            cursor: default;
+            pointer-events: none;
+            background: #f8fafc;
+        }
+        .pager-ellipsis {
+            color: #64748b;
+            padding: 0 0.2rem;
+        }
+        .problem-card {
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 1rem;
+            margin-bottom: 1.25rem;
+            background: #fff;
+        }
+        .editable-display {
+            cursor: text;
+            white-space: pre-wrap;
+            font-weight: normal;
+        }
+        .editable-box {
+            white-space: normal;
+        }
+        .editable-box > .editable-display {
+            display: block;
+            white-space: pre-wrap;
+        }
+        .edit-textarea {
+            width: 100%;
+            box-sizing: border-box;
+            font-family: inherit;
+            font-size: inherit;
+            line-height: 1.5;
+            padding: 1rem;
+            border: 1px solid #9aa5b1;
+            border-radius: 8px;
+            resize: vertical;
+            white-space: pre-wrap;
+            min-height: 120px;
+        }
+        .gt-proof-box {
+            background-color: #fff5e7;
+            border-top: 4px solid #ffc993;
+        }
+        .save-status {
+            font-size: 0.9rem;
+            color: #4a5568;
+            line-height: 1.2;
+        }
+        .save-status:empty {
+            display: none;
+        }
+        .save-status:not(:empty) {
+            margin-top: 0.35rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="edit-main">
+        <div class="edit-toolbar">
+            <div class="edit-meta">
+                <p class="strong">Competition: {{ current_comp }}</p>
+                <p>Page {{ page }} / {{ total_pages }}</p>
+            </div>
+            <a href="{{ url_for('index') }}" class="edit-back-btn">Back To Dashboard</a>
+        </div>
+
+        {% set start_page = [1, page - 2] | max %}
+        {% set end_page = [total_pages, page + 2] | min %}
+        <nav class="pager" aria-label="Pagination">
+            {% if has_prev %}
+                <a class="pager-item" href="{{ url_for('edit_view', page=prev_page) }}" aria-label="Previous page">‹</a>
+            {% else %}
+                <span class="pager-item disabled" aria-hidden="true">‹</span>
+            {% endif %}
+
+            {% if start_page > 1 %}
+                <a class="pager-item" href="{{ url_for('edit_view', page=1) }}">1</a>
+                {% if start_page > 2 %}<span class="pager-ellipsis">…</span>{% endif %}
+            {% endif %}
+
+            {% for p in range(start_page, end_page + 1) %}
+                {% if p == page %}
+                    <span class="pager-item active">{{ p }}</span>
+                {% else %}
+                    <a class="pager-item" href="{{ url_for('edit_view', page=p) }}">{{ p }}</a>
+                {% endif %}
+            {% endfor %}
+
+            {% if end_page < total_pages %}
+                {% if end_page < total_pages - 1 %}<span class="pager-ellipsis">…</span>{% endif %}
+                <a class="pager-item" href="{{ url_for('edit_view', page=total_pages) }}">{{ total_pages }}</a>
+            {% endif %}
+
+            {% if has_next %}
+                <a class="pager-item" href="{{ url_for('edit_view', page=next_page) }}" aria-label="Next page">›</a>
+            {% else %}
+                <span class="pager-item disabled" aria-hidden="true">›</span>
+            {% endif %}
+        </nav>
+
+        {% if error_message %}
+            <div class="error">{{ error_message }}</div>
+        {% endif %}
+
+        {% for item in items %}
+            <div class="problem-card">
+                <h3>Problem {{ item.id }}</h3>
+
+                <p class="strong">Problem Statement</p>
+                <div class="box problem-box editable-box" data-field="problem" data-problem-id="{{ item.id }}">
+                    <div class="marked editable-display"></div>
+                    <textarea class="raw-source" hidden>{{- item.problem_text | default("", true) -}}</textarea>
+                    <div class="save-status"></div>
+                </div>
+
+                {% if is_final_answer %}
+                    <p class="strong">Final Answer</p>
+                    <div class="box solution-box editable-box" data-field="final_answer" data-problem-id="{{ item.id }}">
+                        <div class="marked editable-display"></div>
+                        <textarea class="raw-source" hidden>{{- item.final_answer | default("", true) -}}</textarea>
+                        <div class="save-status"></div>
+                    </div>
+                {% else %}
+                    <p class="strong">Grading Scheme</p>
+                    <div class="box judgment-box editable-box" data-field="grading_scheme" data-problem-id="{{ item.id }}">
+                        <div class="marked editable-display"></div>
+                        <textarea class="raw-source" hidden>{{- item.grading_scheme_raw | default("", true) -}}</textarea>
+                        <div class="save-status"></div>
+                    </div>
+
+                    <details class="judgment-details">
+                        <summary><span class="strong">Ground Truth Solutions ({{ item.ground_truth_proofs | length }})</span></summary>
+                        {% if item.ground_truth_proofs and item.ground_truth_proofs|length > 0 %}
+                            {% for proof in item.ground_truth_proofs %}
+                                <p class="strong">Solution {{ loop.index }}</p>
+                                <div class="box gt-proof-box editable-box" data-field="ground_truth_proof" data-problem-id="{{ item.id }}" data-proof-idx="{{ loop.index0 }}">
+                                    <div class="marked editable-display"></div>
+                                    <textarea class="raw-source" hidden>{{- proof -}}</textarea>
+                                    <div class="save-status"></div>
+                                </div>
+                            {% endfor %}
+                        {% else %}
+                            <div class="box judgment-box">No ground-truth solutions found.</div>
+                        {% endif %}
+                    </details>
+                {% endif %}
+            </div>
+        {% endfor %}
+
+        <nav class="pager" aria-label="Pagination bottom">
+            {% if has_prev %}
+                <a class="pager-item" href="{{ url_for('edit_view', page=prev_page) }}" aria-label="Previous page">‹</a>
+            {% else %}
+                <span class="pager-item disabled" aria-hidden="true">‹</span>
+            {% endif %}
+            {% for p in range(start_page, end_page + 1) %}
+                {% if p == page %}
+                    <span class="pager-item active">{{ p }}</span>
+                {% else %}
+                    <a class="pager-item" href="{{ url_for('edit_view', page=p) }}">{{ p }}</a>
+                {% endif %}
+            {% endfor %}
+            {% if has_next %}
+                <a class="pager-item" href="{{ url_for('edit_view', page=next_page) }}" aria-label="Next page">›</a>
+            {% else %}
+                <span class="pager-item disabled" aria-hidden="true">›</span>
+            {% endif %}
+        </nav>
+    </div>
+
+    <script id="HighlightJS" src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script>
+        const CURRENT_COMP = {{ current_comp | tojson }};
+
+        function renderMath(el) {
+            if (window.renderMathInElement) {
+                renderMathInElement(el, {
+                    delimiters: [
+                        { left: '$$', right: '$$', display: true },
+                        { left: '$', right: '$', display: false },
+                        { left: '\\(', right: '\\)', display: false },
+                        { left: '\\[', right: '\\]', display: true }
+                    ],
+                    throwOnError: false
+                });
+            }
+        }
+
+        function normalizeEditableDisplay(box) {
+            const display = box.querySelector('.editable-display');
+            const raw = box.querySelector('.raw-source');
+            if (!display || !raw) return;
+            display.textContent = raw.value.trim();
+        }
+
+        async function saveEdit(box, value) {
+            const payload = {
+                comp: CURRENT_COMP,
+                field: box.dataset.field,
+                problem_id: Number(box.dataset.problemId),
+                value: value
+            };
+            if (box.dataset.proofIdx !== undefined) {
+                payload.proof_idx = Number(box.dataset.proofIdx);
+            }
+            const response = await fetch('/edit/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!response.ok) {
+                let message = 'Failed to save.';
+                try {
+                    const data = await response.json();
+                    if (data && data.error) message = data.error;
+                } catch (_) {}
+                throw new Error(message);
+            }
+        }
+
+        function attachEditable(box) {
+            const display = box.querySelector('.editable-display');
+            const raw = box.querySelector('.raw-source');
+            const status = box.querySelector('.save-status');
+            if (!display || !raw || !status) return;
+
+            display.addEventListener('click', () => {
+                if (box.dataset.editing === '1') return;
+                box.dataset.editing = '1';
+
+                const textarea = document.createElement('textarea');
+                textarea.className = 'edit-textarea';
+                textarea.value = raw.value;
+                const targetHeight = Math.max(display.offsetHeight, box.offsetHeight - 30, 120);
+                textarea.style.height = `${targetHeight}px`;
+
+                display.style.display = 'none';
+                box.insertBefore(textarea, status);
+                textarea.focus();
+
+                let closed = false;
+                const finish = async (save) => {
+                    if (closed) return;
+                    closed = true;
+                    const newValue = textarea.value;
+                    textarea.remove();
+                    box.dataset.editing = '0';
+
+                    if (!save || newValue === raw.value) {
+                        display.style.display = '';
+                        return;
+                    }
+
+                    status.textContent = 'Saving...';
+                    try {
+                        await saveEdit(box, newValue);
+                        raw.value = newValue;
+                        display.textContent = newValue.trim();
+                        display.style.display = '';
+                        renderMath(display);
+                        status.textContent = 'Saved.';
+                        setTimeout(() => { status.textContent = ''; }, 1200);
+                    } catch (err) {
+                        display.style.display = '';
+                        status.textContent = String(err.message || 'Save failed.');
+                    }
+                };
+
+                textarea.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape') {
+                        e.preventDefault();
+                        finish(false);
+                    }
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                        e.preventDefault();
+                        textarea.blur();
+                    }
+                });
+                textarea.addEventListener('blur', () => finish(true));
+            });
+        }
+
+        function initializeEditPage() {
+            document.querySelectorAll('.editable-box').forEach((box) => {
+                normalizeEditableDisplay(box);
+                attachEditable(box);
+            });
+            document.querySelectorAll('.editable-display').forEach(renderMath);
+        }
+
+        document.addEventListener('DOMContentLoaded', initializeEditPage);
+        window.addEventListener('load', () => {
+            document.querySelectorAll('.editable-display').forEach(renderMath);
+        });
+    </script>
+</body>
+</html>
