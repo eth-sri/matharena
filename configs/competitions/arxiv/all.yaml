@@ -3,6 +3,6 @@ instruction: |
   The question is written in such a way that it solely requires you to find the final answer. Make sure to follow the additional formatting instructions if they are provided in the question.
   Put the final answer you find within \\boxed{{}}.
 strict_parsing: false
-n_problems: 40
+n_problems: 72
 date: "2025-12-01"
 dataset_path: MathArena/arxivmath
