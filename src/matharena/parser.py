@@ -690,7 +690,7 @@ class ParsePrimitive(ParseObject):
             try:
                 string_no_eq = string
                 if "=" in string_no_eq:
-                    # rfind is used to remove the last occurence of "="
+                    # rfind is used to remove the last occurrence of "="
                     string_no_eq = string_no_eq[string_no_eq.rfind("=") + 1 :]
                 output_val = latex2sympy_fixed(string_no_eq)
                 # print complex and real part separately
