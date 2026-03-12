@@ -1342,7 +1342,7 @@ class APIClient:
                         try:
                             response.usage.input_tokens
                         except:
-                            raise ValueError("No usage info in response -> if in background, this mean exception occured.")
+                            raise ValueError("No usage info in response -> if in background, this mean exception occurred.")
                     request_logger.log_response(ts=ts, batch_idx=idx, response=response.model_dump())
                 except Exception as e:
                     if "rate limit" not in str(e).lower() and "429" not in str(e):
