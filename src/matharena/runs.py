@@ -5,6 +5,7 @@ import time
 
 from loguru import logger
 
+from matharena.json_zst import OUTPUT_JSON_SUFFIX, dump_json_zst, load_json_zst
 from matharena.utils import (
     convert_answer_to_string,
     lists_differ,
@@ -17,7 +18,7 @@ from matharena.utils import (
 class Runs:
     """
     List of all runs of a particular solver for a specific problem in a specific comp.
-    Corresponds to outputs/{comp}/{solver}/{problem_idx}.json files.
+    Corresponds to outputs/{comp}/{solver}/{problem_idx}.json.zst files.
     """
 
     def __init__(self, comp_name, is_fa, solver_name, solver_type, problem, output_dir):
@@ -67,7 +68,7 @@ class Runs:
         self.messages, self.judgment, self.history, self.detailed_costs = [], [], [], []
 
         # Path
-        self.path = f"{output_dir}/{self.problem_idx}.json"
+        self.path = f"{output_dir}/{self.problem_idx}{OUTPUT_JSON_SUFFIX}"
         self.message_keys_zorder = {
             "role": 0,
             "type": 1,
@@ -86,7 +87,7 @@ class Runs:
         """Loads runs from a JSON file."""
         if not os.path.exists(self.path):
             return
-        runs_dict = json.load(open(self.path, "r", encoding="utf-8"))
+        runs_dict = load_json_zst(self.path)
         self.from_dict(runs_dict)
 
     def save_to_file(self):
@@ -94,8 +95,7 @@ class Runs:
         runs_dict = self.to_dict()
         if self.N == 0:
             return
-        with open(self.path, "w", encoding="utf-8") as f:
-            json.dump(runs_dict, f, indent=4, ensure_ascii=False)
+        dump_json_zst(runs_dict, self.path, indent=4, ensure_ascii=False)
 
     def from_dict(self, runs_dict):
         """Loads the object from a dictionary.

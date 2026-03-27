@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 import pandas as pd
 import subprocess
+from matharena.json_zst import OUTPUT_JSON_SUFFIX, load_json_zst
 
 load_dotenv()
 
@@ -163,8 +164,8 @@ def main():
     if euler_id is None:
         raise ValueError(f"Problem ID {problem_id} not found in source.csv")
 
-    # Find all files of the form outputs/euler/{euler}/{provider}/{model}/{problem_id}.json
-    files = glob.glob(f"outputs/euler/{euler}/*/*/{problem_id}.json")
+    # Find all files of the form outputs/euler/{euler}/{provider}/{model}/{problem_id}.json.zst
+    files = glob.glob(f"outputs/euler/{euler}/*/*/{problem_id}{OUTPUT_JSON_SUFFIX}")
     if len(files) == 0:
         raise ValueError(f"No files found for problem ID {problem_id}")
 
@@ -172,10 +173,9 @@ def main():
 
     all_answers = []
     for file in files:
-        with open(file, "r") as f:
-            data = json.load(f)
-            print(file, data.get("answers", []))
-            all_answers.extend(data.get("answers", []))
+        data = load_json_zst(file)
+        print(file, data.get("answers", []))
+        all_answers.extend(data.get("answers", []))
 
     # Filter out non-integer answers
     all_answers = [convert_to_int(answer) for answer in all_answers]

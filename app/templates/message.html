@@ -1,9 +1,20 @@
 
 <div class="message">
-    <div class="strong" style="margin-top: 1rem; margin-bottom: 0.5rem;">{{ tagline }}</div>
-    {% if code %}
-        <pre class="language-python marked box response-box code"><code>{{ code }}</code></pre>
+    {% if is_cot %}
+        <details class="cot-message">
+            <summary class="strong" style="margin-top: 1rem; margin-bottom: 0.5rem;">{{ tagline }}</summary>
+            {% if code %}
+                <pre class="language-python marked box response-box code"><code>{{ code }}</code></pre>
+            {% else %}
+                <div class="box response-box {{ role }}">{% if content.text is not none %}<div class="marked">{{ content.text }}</div>{% endif %}{% if content.img is not none %}<img src="{{ content.img }}" class="problem-image">{% endif %}</div>
+            {% endif %}
+        </details>
     {% else %}
-        <div class="marked box response-box {{ role }}">{% if content.text is not none %}{{ content.text }}{% endif %} {% if content.img is not none %} <img src="{{ content.img }}" class="problem-image">{% endif %}</div>
+        <div class="strong" style="margin-top: 1rem; margin-bottom: 0.5rem;">{{ tagline }}</div>
+        {% if code %}
+            <pre class="language-python marked box response-box code"><code>{{ code }}</code></pre>
+        {% else %}
+            <div class="box response-box {{ role }}">{% if content.text is not none %}<div class="marked">{{ content.text }}</div>{% endif %}{% if content.img is not none %}<img src="{{ content.img }}" class="problem-image">{% endif %}</div>
+        {% endif %}
     {% endif %}
 </div>

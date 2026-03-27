@@ -1,0 +1,6 @@
+model_config: gemini/gemini-31-pro-low
+scaffold_config: judges/ablations/maj_judge
+override:
+  model_configs: 
+    - gemini/gemini-31-pro-low
+    - gemini/gemini-31-pro-low

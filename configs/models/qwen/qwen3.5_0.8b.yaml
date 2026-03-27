@@ -1,0 +1,24 @@
+model: qwen/qwen3.5-0.8b
+api: custom
+api_key_env: VLLM_API_KEY
+base_url: http://localhost:8001/v1
+max_tokens: 65500
+temperature: 1.0
+top_p: 0.95
+presence_penalty: 1.5
+extra_body:
+  top_k: 20
+  min_p: 0.0
+  repetition_penalty: 1.0
+concurrent_requests: 64
+read_cost: 0.0
+write_cost: 0.0
+human_readable_id: Qwen3.5-0.8B
+date: "2026-03-02"
+other_params:
+  open: true
+  creator: Qwen
+  parameters: 0.8
+  active_parameters: 0.8
+  huggingface_id: Qwen/Qwen3.5-0.8B
+

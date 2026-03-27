@@ -62,7 +62,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Export accepted arXiv questions into data/arxiv/december."
     )
-    parser.add_argument("--paper-root", default="arxivbench/paper", help="Root directory containing paper folders.")
+    parser.add_argument("--paper-root", default="arxivmath/paper", help="Root directory containing paper folders.")
     parser.add_argument("--out-dir", default="data/arxiv/january", help="Output dataset directory.")
     args = parser.parse_args()
 

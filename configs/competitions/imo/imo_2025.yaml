@@ -14,4 +14,4 @@ n_problems: 6
 date: "2025-07-15"
 final_answer: false
 dataset_path: MathArena/imo_2025
-judge_config: judges/judge
+judge_config: judges/ablations/judge

@@ -1,0 +1,133 @@
+scaffold_name: norm_judge
+n_threads: 32
+aggregate_points_by: min
+enabled_tools:
+  - execute_code
+max_tool_calls: 20
+api_client_remove_keys:
+  - human_readable_id
+  - other_params
+  - date
+tool_specs:
+  execute_code:
+    tool_spec:
+      type: function
+      function:
+        description: "Executes the code in the given language and returns the standard output and standard error. Your code is always executed as a self-contained script, and it does not have access to the previously executed code blocks! If you use python, your code will be run in an environment with the following libraries installed: pandas, numpy, scikit-learn, sympy, gmpy2"
+        name: execute_code
+        parameters:
+          type: object
+          properties:
+            code:
+              type: string
+              description: The self-contained code to execute
+            lang:
+              type: string
+              description: The programming language of the code (python or cpp)
+          required:
+            - code
+            - lang
+    tool_spec_gdm:
+      name: code_execution
+normalize_prompt: |
+  We have obtained a benchmark to test how good LLMs are at writing difficult mathematical proofs.
+  We want to test how biased our graders are against certain styles of writing proofs to investigate whether the graders are truly evaluating the mathematical content of the proofs, or if they are being biased by superficial aspects of the writing style.
+  Your job is to take a proof written by an LLM and rewrite it in the given style, **keeping the mathematical content exactly the same** but changing the superficial writing style.
+
+  In particular, you are assigned the following style: "Concise Writer". This style is characterized by:
+  - Does not repeat the problem statement at the beginning of the proof, and does not include any unnecessary rephrasing or restatements of the same idea (if contained in the original proof).
+  - Does not use markdown sections or any other explicit organizational structure in the proof (if contained in the original proof).
+  - Does not present a conclusion at the end of the proof, and does not include any summarizing statements that restate the result that was proven (if contained in the original proof).
+  - Writes in a concise and straightforward manner, without unnecessary words or explanations. The proof should be as short as possible while still being clear.
+
+  You should also follow these style guidelines when rewriting the proof:
+  - Use LaTeX formatting for all mathematical expressions and remove any unicode characters in favor of their LaTeX equivalents. You should use dollar delimiters for inline math and double dollar delimiters for display math.
+  - All sentences should be complete and well-formed, with proper grammar and punctuation.
+  - If the proof is (mostly) empty, you should not invent content to add. LLMs sometimes make this mistake. In these cases, you can simply reformat the existing content to fit the style guidelines as best as possible, without adding any new mathematical claims or reasoning.
+  - If the proof contains reconsiderations (e.g., "Wait, this step doesn't work, let's try something else"), you should keep these reconsiderations in the rewritten proof, but you should rephrase them to fit the style guidelines. You should explicitly keep the reconsiderations in the rewritten proof.
+  
+  Under no circumstance are you allowed to change:
+  - Any of the mathematical content of the proof, including the logical structure, the mathematical claims being made, and the final conclusion.
+  - The correctness of the proof. You should never change things you believe to be incorrect, and keep them as they are. It is never your job to judge correctness or fix the proof.
+  - If the original proof says it has not found a complete solution, it is NOT your job to complete the solution. You should keep the proof at the same level of completeness as the original proof, and you should not add any new mathematical claims or reasoning that were not present in the original proof.
+
+  Your output should not reference these instructions, instead it should simply be the rewritten proof in the style of a "Verbose Writer" as described above.
+  Your proof should be self-contained and should not reference the original proof or the instructions.
+
+  ## Problem ##
+  {problem_statement}
+
+  ## Proof ##
+  {student_answer}
+
+judge_prompt: |
+  You are an expert math proof grader. You are judging the correctness of an LLM-generated proof for a math problem.
+
+  ### Input
+  Your input will consist of:
+  * **Problem Statement**: A mathematical problem that the proof is attempting to solve.
+  * **Marking Scheme**: A problem-specific grading rubric (0-7 scale) with checkpoints, zero-credit items, and deductions. You must follow this scheme when assigning points.
+  * **Proof Solution**: The proof that you need to evaluate. This proof may contain errors, omissions, or unclear steps. The proof was generated by another language model.
+
+  ### Task
+  Analyze the proof carefully.
+  **Core principles (in order of precedence):**
+  1) **Mathematical validity** of the proof's reasoning and conclusion.
+  2) **Problem constraints** (e.g., unique required final value; forbidden tools if stated).
+  3) **Advisory mapping to the marking scheme** (checkpoints/deductions), allowing different orders and techniques.
+
+  **Alternative-approach policy:**
+  - If the proof uses a different but valid method, **map its steps to equivalent rubric checkpoints** (same logical role) and award points accordingly.
+  - Apply zero-credit items/deductions **only when the underlying issue actually occurs** in the given proof's approach; do not auto-penalize for omitting a rubric step.
+  - Avoid double-counting mutually exclusive items; if two items solve the same logical gap, **award the larger only**.
+  - If the final numeric/algebraic answer is wrong where uniqueness is required, award only partial credit justified by correct intermediate reasoning.
+
+  **Rigor and evidence:**
+  - Award credit for intermediate claims **only if adequately justified** within the proof (not merely asserted).
+  - If a step is plausible but under-justified, award **conservative partial credit** and note what is missing.
+
+  **What to produce:**
+  - Identify logical errors, incorrect steps, or unclear reasoning.
+  - Give a **score between 0 and 7** with a **detailed assessment**.
+  - **Within the assessment text**, show clearly how the score was derived:
+      - Which rubric checkpoints were earned and the points you awarded.
+      - Any zero-credit items or deductions you applied (and why).
+      - How these add up to the final integer score in [0-7].
+
+  ### Code execution
+  Use the provided code execution tool to verify calculations and check algebraic manipulations.
+  Sympy and Numpy are available for symbolic verification or numerical checks. If possible, always prefer symbolic verification for mathematical proofs.
+  However, do not use code execution as a crutch for understanding the proof. Your primary evaluation should be based on the logical structure and mathematical validity of the proof as written.
+
+  ### Geometry problems
+  Geometric problems often are solved using "bashed" solutions, either with coordinate geometry or complex numbers.
+  Such proofs should be evaluated with extreme care, and the code execution tool should be used generously to verify the correctness of the bash and the validity of the conclusions drawn from it.
+  Any mistake in a bashed approach should be immediately given 0 points, since a single error can invalidate the entire Solution.
+  Therefore, be extremely strict when evaluating bashed solutions.
+
+  ### Output Format
+  Respond with **only** well-formed XML using the structure below. Do not include any extra text or Markdown.
+  **Requirements:**
+  - `<points>` must be an integer in [0, 7].
+  - `<assessment>` must be a **detailed analysis** that explains your reasoning step-by-step and provides a clear **rationale for the score**.
+  - `<errors>` must be a list of specific issues (empty if score = 7).
+
+  Example output:
+  <points>0</points>
+  <assessment>The proof shows a good understanding of the main idea, but has some unclear reasoning and minor mistakes...</assessment>
+  <errors>
+      1. specific error 1,
+      2. specific error 2,
+      ...
+  </errors>
+
+  ### INPUT DATA
+
+  ## Problem Statement ##
+  {problem_statement}
+
+  ## Marking Scheme ##
+  {guidelines}
+
+  ## Proof Solution ##
+  {student_answer}

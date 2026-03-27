@@ -2,7 +2,6 @@
 {% extends "base.html" %}
 
 {% block sidebar %}
-    <a href="{{ sidebar.expand_url }}" class="sidebar-main-button">{{ sidebar.toggle_text }}</a>
     <a href="{{ url_for('model_view', model=sidebar.current_model) }}" class="sidebar-item strong">  {{ sidebar.current_model }}</a>
     <div class="expanded">
         {% for problem, data in sidebar.problems.items() %}
@@ -15,102 +14,341 @@
     <h3 style="text-align: left;">Model: {{ model }}</h3>
     <h3 style="text-align: left;">Problem: {{ problem_name }} {{ ticks }}</h3>
 
-    <div class="marked box problem-box">{% if problem_statement %}{{ problem_statement }}{% endif %}{% if img_path %}<img src="{{ img_path }}" class="problem-image">{% endif %}</div>
+    <div class="box problem-box">{% if problem_statement %}<div class="marked">{{ problem_statement }}</div>{% endif %}{% if img_path %}<img src="{{ img_path }}" class="problem-image">{% endif %}</div>
     {% if is_final_answer %}
-        <div class="marked box solution-box">{{ solution | trim }}</div>
+        <div class="box solution-box"><div class="marked">{{ solution | trim }}</div></div>
     {% else %}
-        <p class="strong">Grading Scheme:</p>
-        <div class="box judgment-box"><div class="marked judgment-content">{{- (grading_scheme_text if grading_scheme_text else "No grading scheme found.") | trim -}}</div></div>
-        <p class="strong">Ground-Truth Proofs:</p>
+        {% if grading_scheme_text %}
+            <p class="strong">Grading Scheme:</p>
+            <div class="box judgment-box"><div class="marked judgment-content">{{- grading_scheme_text | trim -}}</div></div>
+        {% endif %}
         {% if ground_truth_proofs and ground_truth_proofs|length > 0 %}
+            <p class="strong">Ground-Truth Proofs:</p>
             {% for proof in ground_truth_proofs %}
                 <details class="judgment-details">
                     <summary><span class="strong">Proof {{ loop.index }}</span></summary>
                     <div class="box judgment-box"><div class="marked judgment-content">{{- proof | trim -}}</div></div>
                 </details>
             {% endfor %}
-        {% else %}
-            <div class="box judgment-box">No ground-truth proofs found.</div>
         {% endif %}
     {% endif %}
 
-    {% for instance in instances %}
-        <div class="fake-hr"></div>
-        <details class="strong">
-            <summary>[Run {{ instance.run }}] Metadata:</summary>
-            <div class="box metadata-box">
-                {% if instance.metadata.cost %}
-                <p>Cost: ${{ instance.metadata.cost.cost }}</p>
-                <p>Input Tokens: {{ instance.metadata.cost.input_tokens }}</p>
-                <p>Output Tokens: {{ instance.metadata.cost.output_tokens }}</p>
-                    {% if instance.metadata.cost.time %}
-                        <p>Time taken: {{ instance.metadata.cost.time}}s</p>
-                    {% endif %}
-                {% endif %}
-                <p>Tool Calls:</p>
-                {% if instance.metadata.tool_calls %}
-                <ul>
-                {% for tool, count in instance.metadata.tool_calls.items() %}
-                    <li>{{ tool }}: {{ count }}</li>
-                {% endfor %}
-                </ul>
-                {% else %}
-                <p>No tool calls in this solution.</p>
-                {% endif %}
-            </div>
-        </details>
-        {% if instance.history and instance.history|length > 0 %}
-            <details class="response-box-details strong" id="{{ instance.conversation_id }}>>history">
-                <summary>[Run {{ instance.run }}] History:</summary>
-            </details>
-        {% endif %}
-        <details class="response-box-details strong" id="{{ instance.conversation_id }}">
-            <summary>[Run {{ instance.run }}] Conversation:</summary>
-        </details>
-        {%- if is_final_answer -%}
-            <p class="strong">[Run {{ instance.run }}] Parsed Answer ({{ instance.verdict }}, {{ instance.warnings }} warnings):</p>
-            <div class="box answer-box {{ instance.correct_cls }}">{{ instance.answer | trim }}</div>
-            <form method="post" action="{{ url_for('override_result', model=model, problem_name=problem_id, run_idx=instance.run) }}" class="override-form">
-                <label for="manual-correct-{{ instance.run }}">Manual override:</label>
-                <select id="manual-correct-{{ instance.run }}" name="manual_correct">
-                    <option value="auto" {% if instance.manual_value == "auto" %}selected{% endif %}>Auto</option>
-                    <option value="correct" {% if instance.manual_value == "correct" %}selected{% endif %}>Correct</option>
-                    <option value="incorrect" {% if instance.manual_value == "incorrect" %}selected{% endif %}>Incorrect</option>
-                </select>
-                <button type="submit">Save</button>
-            </form>
-        {%- else -%}
-            <p class="strong">[Run {{ instance.run }}] Judge Output ({{ instance.verdict }}):</p>
-            {%- if instance.judgments and instance.judgments|length > 0 -%}
-                {%- for judgment in instance.judgments -%}
-                    <details class="judgment-details">
-                        <summary><span class="strong">Judge {{ judgment.judge_idx }}: {{ judgment.points }}/{{ judgment.max_points }}</span></summary>
-                        {%- if judgment.error -%}
-                            <div class="box judgment-box incorrect"><div class="marked judgment-content">{{- judgment.error | trim -}}</div></div>
-                        {%- endif -%}
-                        {%- if judgment.details and judgment.details|length > 0 -%}
-                            {%- for detail in judgment.details -%}
-                                <div class="box judgment-box">
-                                    <p class="strong">{{ detail.title }}{% if detail.points is defined and detail.max_points is defined %} ({{ detail.points }}/{{ detail.max_points }}){% endif %}</p>
-                                    <div class="marked judgment-content">{{- detail.desc | trim -}}</div>
-                                </div>
-                            {%- endfor -%}
-                        {%- else -%}
-                            <div class="box judgment-box">No grader details available.</div>
-                        {%- endif -%}
+    {% if instances %}
+        <div class="run-tab" role="tablist">
+            {% for instance in instances %}
+                <button
+                    type="button"
+                    class="run-tab-button {{ instance.correct_cls }} {% if loop.first %}active{% endif %}"
+                    data-target="run-tab-{{ instance.run }}"
+                >
+                    Run {{ instance.run }}
+                </button>
+            {% endfor %}
+        </div>
+
+        {% for instance in instances %}
+            <div id="run-tab-{{ instance.run }}" class="run-tabcontent" style="display: {{ 'block' if loop.first else 'none' }};">
+                {%- if is_final_answer -%}
+                    <p class="strong">[Run {{ instance.run }}] Parsed Answer ({{ instance.verdict }}, {{ instance.warnings }} warnings):</p>
+                    <div class="box answer-box {{ instance.correct_cls }}"><div class="marked">{{ instance.answer | trim }}</div></div>
+                    <form method="post" action="{{ url_for('override_result', model=model, problem_name=problem_id, run_idx=instance.run) }}" class="override-form">
+                        <label for="manual-correct-{{ instance.run }}">Manual override:</label>
+                        <select id="manual-correct-{{ instance.run }}" name="manual_correct">
+                            <option value="auto" {% if instance.manual_value == "auto" %}selected{% endif %}>Auto</option>
+                            <option value="correct" {% if instance.manual_value == "correct" %}selected{% endif %}>Correct</option>
+                            <option value="incorrect" {% if instance.manual_value == "incorrect" %}selected{% endif %}>Incorrect</option>
+                        </select>
+                        <button type="submit">Save</button>
+                    </form>
+                {%- endif -%}
+                <details class="strong">
+                    <summary>[Run {{ instance.run }}] Metadata:</summary>
+                    <div class="box metadata-box">
+                        {% if instance.metadata.cost %}
+                        <p>Cost: ${{ instance.metadata.cost.cost }}</p>
+                        <p>Input Tokens: {{ instance.metadata.cost.input_tokens }}</p>
+                        <p>Output Tokens: {{ instance.metadata.cost.output_tokens }}</p>
+                            {% if instance.metadata.cost.time %}
+                                <p>Time taken: {{ instance.metadata.cost.time}}s</p>
+                            {% endif %}
+                        {% endif %}
+                        <p>Tool Calls:</p>
+                        {% if instance.metadata.tool_calls %}
+                        <ul>
+                        {% for tool, count in instance.metadata.tool_calls.items() %}
+                            <li>{{ tool }}: {{ count }}</li>
+                        {% endfor %}
+                        </ul>
+                        {% else %}
+                        <p>No tool calls in this solution.</p>
+                        {% endif %}
+                    </div>
+                </details>
+                {% if instance.history and instance.history|length > 0 %}
+                    <details class="response-box-details strong" id="{{ instance.conversation_id }}>>history">
+                        <summary>[Run {{ instance.run }}] History:</summary>
                     </details>
-                {%- endfor -%}
-            {%- else -%}
-                <div class="box judgment-box">No judgments available for this run.</div>
-            {%- endif -%}
-        {%- endif %}
-    {% endfor %}
-
-    {% if boxes_expanded %}
-    <style>
-        .box {
-            max-height: none !important;
-        }
-    </style>
+                {% endif %}
+                <details class="response-box-details strong" id="{{ instance.conversation_id }}" open>
+                    <summary>[Run {{ instance.run }}] Conversation:</summary>
+                </details>
+                {%- if not is_final_answer -%}
+                    {%- if instance.judgments and instance.judgments|length > 0 -%}
+                        {%- for judgment in instance.judgments -%}
+                            <details class="judgment-details" open>
+                                <summary>
+                                    <span class="strong">
+                                        Judge {{ judgment.judge_idx }}:
+                                        <span class="judgment-score-display">{{ judgment.points }}</span>/{{ judgment.max_points }}
+                                        {% if judgment.manual_overwrite %}<span class="manual-overwrite-label">(manual overwrite)</span>{% endif %}
+                                    </span>
+                                </summary>
+                                {% if overwrite_enabled %}
+                                    <div class="judgment-score-row">
+                                        <label class="strong" for="judgment-score-{{ instance.run }}-{{ judgment.judge_idx }}">Score</label>
+                                        <input
+                                            id="judgment-score-{{ instance.run }}-{{ judgment.judge_idx }}"
+                                            type="number"
+                                            step="any"
+                                            class="judgment-score-field"
+                                            data-endpoint="{{ url_for('override_judgment', model=model, problem_name=problem_id, run_idx=instance.run, judge_idx=judgment.judge_idx) }}"
+                                            data-desc="{{ judgment.editable_text }}"
+                                            value="{{ judgment.points }}"
+                                        >
+                                        <span>/ {{ judgment.max_points }}</span>
+                                    </div>
+                                {% endif %}
+                                <div
+                                    class="box judgment-box judge-output-box editable-box"
+                                    data-endpoint="{{ url_for('override_judgment', model=model, problem_name=problem_id, run_idx=instance.run, judge_idx=judgment.judge_idx) }}"
+                                    data-points="{{ judgment.points }}"
+                                    data-edit-at-top="1"
+                                    {% if overwrite_enabled %}data-inline-edit="1"{% endif %}
+                                >
+                                    <div class="marked editable-display">{{- judgment.editable_text | trim -}}</div>
+                                    <textarea class="raw-source" hidden>{{- judgment.editable_text -}}</textarea>
+                                    <div class="save-status"></div>
+                                </div>
+                                {% if judgment.additional_info %}
+                                    <details class="judgment-extra-details">
+                                        <summary>
+                                            <span class="strong">Additional Info</span>
+                                        </summary>
+                                        {% for item in judgment.additional_info %}
+                                            <div class="judgment-extra-item">
+                                                <div class="judgment-extra-key strong">{{ item.key }}</div>
+                                                <div class="box judgment-box judgment-extra-box">
+                                                    <div class="marked judgment-content">{{- item.value | trim -}}</div>
+                                                </div>
+                                            </div>
+                                        {% endfor %}
+                                    </details>
+                                {% endif %}
+                            </details>
+                        {%- endfor -%}
+                    {%- endif -%}
+                {%- endif %}
+            </div>
+        {% endfor %}
     {% endif %}
+
+    <style>
+        .run-tab {
+            background-color: #f8f9fa;
+            border-radius: 6px 6px 0 0;
+            margin-top: 1.5rem;
+        }
+
+        .run-tab-button {
+            background-color: inherit;
+            outline: none;
+            cursor: pointer;
+            padding: 14px 17px;
+            transition: background-color 0.3s ease, color 0.3s ease;
+            font-size: 0.95rem;
+            color: #495057;
+            border-top: 1px solid transparent;
+            border-left: 1px solid transparent;
+            border-right: 1px solid #dee2e6;
+            border-bottom: 4px solid transparent;
+        }
+
+        .run-tab-button.correct {
+            border-top: 4px solid #76c77b;
+        }
+
+        .run-tab-button.incorrect {
+            border-top: 4px solid #ff8a80;
+        }
+
+        .run-tab-button:last-child {
+            border-right: none;
+        }
+
+        .run-tab-button:hover {
+            background-color: #e9ecef;
+            color: #0056b3;
+        }
+
+        .run-tab-button.active {
+            background-color: #ffffff;
+            color: #007bff;
+            font-weight: 600;
+        }
+
+        .run-tabcontent {
+            padding: 20px 15px;
+            border: 1px solid #dee2e6;
+            background-color: #ffffff;
+            border-top: none;
+            border-radius: 0 0 6px 6px;
+            line-height: 1.6;
+        }
+
+        .editable-box {
+            white-space: normal;
+        }
+
+        .editable-display {
+            cursor: text;
+            white-space: normal;
+            font-weight: normal;
+        }
+
+        .edit-textarea {
+            width: 100%;
+            box-sizing: border-box;
+            font: inherit;
+            line-height: 1.5;
+            padding: 1rem;
+            border: 1px solid #9aa5b1;
+            border-radius: 8px;
+            resize: vertical;
+            white-space: pre-wrap;
+            min-height: 120px;
+        }
+
+        .save-status {
+            font-size: 0.9rem;
+            color: #4a5568;
+            line-height: 1.2;
+        }
+
+        .save-status:empty {
+            display: none;
+        }
+
+        .save-status:not(:empty) {
+            margin-top: 0.35rem;
+        }
+
+        .judgment-score-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin: 0 0 0.75rem 0;
+        }
+
+        .judgment-score-field {
+            width: 5rem;
+            font: inherit;
+        }
+
+        .judgment-extra-details {
+            margin-top: 0.85rem;
+        }
+
+        .judgment-extra-details summary {
+            cursor: pointer;
+        }
+
+        .judgment-extra-item + .judgment-extra-item {
+            margin-top: 0.75rem;
+        }
+
+        .judgment-extra-key {
+            margin: 0.45rem 0 0.3rem 0;
+        }
+
+        .judgment-extra-box {
+            font-size: 0.95rem;
+        }
+
+    </style>
+
+    <script>
+        async function saveJudgment(endpoint, points, desc) {
+            const body = new URLSearchParams({ points, desc });
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                body
+            });
+            if (!response.ok) {
+                throw new Error('Failed to save judgment.');
+            }
+            return response.json();
+        }
+
+        function initializeProblemJudgmentEditing() {
+            document.querySelectorAll('.editable-box[data-inline-edit="1"]').forEach((box) => {
+                attachInlineTextareaEditor(box, async (value) => {
+                    const result = await saveJudgment(box.dataset.endpoint, box.dataset.points, value);
+                    box.dataset.points = result.points;
+                    const details = box.closest('.judgment-details');
+                    const scoreDisplay = details.querySelector('.judgment-score-display');
+                    const scoreField = details.querySelector('.judgment-score-field');
+                    scoreDisplay.textContent = result.points;
+                    if (scoreField) {
+                        scoreField.value = result.points;
+                        scoreField.dataset.desc = result.desc;
+                    }
+                    return result.desc;
+                });
+            });
+
+            document.querySelectorAll('.judgment-score-field').forEach((input) => {
+                const save = async () => {
+                    const result = await saveJudgment(input.dataset.endpoint, input.value, input.dataset.desc);
+                    const details = input.closest('.judgment-details');
+                    const box = details.querySelector('.editable-box');
+                    const display = box.querySelector('.editable-display');
+                    box.dataset.points = result.points;
+                    input.value = result.points;
+                    input.dataset.desc = result.desc;
+                    details.querySelector('.judgment-score-display').textContent = result.points;
+                    box.querySelector('.raw-source').value = result.desc;
+                    display.textContent = result.desc.trim();
+                    rerenderMath(display);
+                };
+
+                input.addEventListener('change', save);
+                input.addEventListener('blur', save);
+                input.addEventListener('keydown', (event) => {
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        input.blur();
+                    }
+                });
+            });
+
+            document.querySelectorAll('.editable-box[data-inline-edit="1"]').forEach((box) => {
+                renderMarkedText(box.querySelector('.editable-display'), box.querySelector('.raw-source').value.trim());
+            });
+
+            document.querySelectorAll('.run-tab-button').forEach((button) => {
+                button.addEventListener('click', () => {
+                    const targetId = button.dataset.target;
+                    document.querySelectorAll('.run-tabcontent').forEach((panel) => {
+                        panel.style.display = panel.id === targetId ? 'block' : 'none';
+                    });
+                    document.querySelectorAll('.run-tab-button').forEach((other) => {
+                        other.classList.toggle('active', other === button);
+                    });
+                });
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', initializeProblemJudgmentEditing);
+    </script>
 {% endblock %}

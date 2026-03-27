@@ -8,6 +8,7 @@ from huggingface_hub import CommitOperationAdd, HfApi
 from loguru import logger
 
 from matharena.configs import load_configs
+from matharena.json_zst import OUTPUT_JSON_SUFFIX, load_json_zst
 
 
 def load_pr_registry(state_file: Path) -> dict:
@@ -54,13 +55,12 @@ def compute_average_score(output_dir: Path, n_problems: int) -> float | None:
     all_results = []
 
     for idx in range(1, n_problems + 1):
-        result_path = output_dir / f"{idx}.json"
+        result_path = output_dir / f"{idx}{OUTPUT_JSON_SUFFIX}"
         if not result_path.exists():
             logger.warning(f"Missing output file {result_path}, skipping this model/competition pair.")
             return None
 
-        with result_path.open("r", encoding="utf-8") as f:
-            problem_result = json.load(f)
+        problem_result = load_json_zst(result_path)
 
         correct_values = problem_result.get("correct")
         if not isinstance(correct_values, list):

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ metadata.title or paper_id }}</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css" integrity="sha384-6x8FWJQ9gTAlJ3i9zyfiQ4R+2nD2gQnCj2lR7zA6mXUhlJ6FZpC3mbwyO0Z5y9G5" crossorigin="anonymous" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous" />
     <style>
       :root {
         --bg: #f6f7f9;
@@ -13,6 +13,7 @@
         --accent: #0f6a5f;
         --accent-2: #f39c38;
         --panel: #ffffff;
+        --line: #d4d9df;
       }
       * {
         box-sizing: border-box;
@@ -92,7 +93,7 @@
         resize: vertical;
         padding: 10px;
         border-radius: 10px;
-        border: 1px solid #d4d9df;
+        border: 1px solid var(--line);
         font-family: inherit;
         font-size: 1rem;
       }
@@ -138,9 +139,49 @@
         color: var(--accent);
         text-decoration: none;
       }
+      .editor-card {
+        display: grid;
+        gap: 10px;
+      }
+      .editable-box {
+        border: 1px solid #dde3e8;
+        border-radius: 14px;
+        background: linear-gradient(180deg, #fff 0%, #fbfcfd 100%);
+        padding: 18px;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+      }
+      .editable-display {
+        min-height: 84px;
+        white-space: pre-wrap;
+        line-height: 1.65;
+        font-size: 1.02rem;
+        cursor: text;
+      }
+      .editable-display.is-empty {
+        color: var(--muted);
+        font-style: italic;
+      }
+      .edit-shell {
+        display: none;
+        gap: 10px;
+      }
+      .edit-shell textarea {
+        min-height: 160px;
+        background: #fff;
+      }
+      .edit-shell.is-open {
+        display: grid;
+      }
+      .field-note {
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
       @media (max-width: 600px) {
         h1 {
           font-size: 1.6rem;
+        }
+        .editable-box {
+          padding: 15px;
         }
       }
     </style>
@@ -199,14 +240,24 @@
             <button type="submit" name="status" value="keep">Keep and Next</button>
             <button type="submit" name="status" value="discard">Reject</button>
           </div>
-          <div>
-            <label for="question">Question to extract</label>
-            <textarea id="question" name="question" placeholder="What question should we extract from this entry?" style="height: 300px">{{ annotation.question or "" }}</textarea>
-          </div>
-          <div>
-            <label for="answer">Verifiable answer</label>
-            <textarea id="answer" name="answer" placeholder="Provide the unique, verifiable answer.">{{ annotation.answer or "" }}</textarea>
-          </div>
+          {% for field in field_specs %}
+            <div class="editor-card">
+              <label for="{{ field.name }}">{{ field.label }}</label>
+              <div class="editable-box">
+                <div
+                  id="{{ field.name }}-preview"
+                  class="editable-display js-edit-preview"
+                  data-empty-text="{{ field.empty_text }}"
+                ></div>
+                <div id="{{ field.name }}-editor" class="edit-shell">
+                  <textarea id="{{ field.name }}" name="{{ field.name }}" placeholder="{{ field.placeholder }}" style="height: {{ field.height }}px">{{ annotation[field.name] or "" }}</textarea>
+                </div>
+              </div>
+              {% if loop.first %}
+                <div class="field-note">Click the rendered field to edit the raw text, then click away to return to preview.</div>
+              {% endif %}
+            </div>
+          {% endfor %}
         </form>
       </div>
 
@@ -227,19 +278,17 @@
         </div>
       </nav>
     </div>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css"
-    integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"
     integrity="sha384-XjKyOOlGwcjNTAIQHIpgOno0Hl1YQqzUOEleOLALmuqehneUG+vnGctmUb0ZY0l8"
     crossorigin="anonymous"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
-    integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"
-    onload="renderMathInElement(document.body);"></script>
+    integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"></script>
     <script>
       document.addEventListener("DOMContentLoaded", () => {
         const container = document.querySelector(".wrap");
-        if (container && window.renderMathInElement) {
-          window.renderMathInElement(container, {
+        const renderMath = (element) => {
+          if (!element || !window.renderMathInElement) return;
+          window.renderMathInElement(element, {
             delimiters: [
               { left: "$$", right: "$$", display: true },
               { left: "$", right: "$", display: false },
@@ -248,6 +297,61 @@
             ],
             throwOnError: false,
           });
+        };
+
+        const syncPreview = (textarea) => {
+          const preview = textarea
+            .closest(".editable-box")
+            ?.querySelector(".js-edit-preview");
+          if (!preview) return;
+          const raw = textarea.value.trim();
+          if (!raw) {
+            preview.textContent = preview.dataset.emptyText || "";
+            preview.classList.add("is-empty");
+            return;
+          }
+          preview.classList.remove("is-empty");
+          preview.textContent = raw;
+          renderMath(preview);
+        };
+
+        document.querySelectorAll(".edit-shell textarea").forEach((textarea) => {
+          syncPreview(textarea);
+          textarea.addEventListener("input", () => syncPreview(textarea));
+        });
+
+        document.querySelectorAll(".editable-box").forEach((box) => {
+          const preview = box.querySelector(".js-edit-preview");
+          const editor = box.querySelector(".edit-shell");
+          const textarea = box.querySelector("textarea");
+          if (!preview || !editor || !textarea) return;
+
+          const openEditor = () => {
+            if (editor.classList.contains("is-open")) return;
+            preview.style.display = "none";
+            editor.classList.add("is-open");
+            textarea.focus();
+            textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+          };
+
+          const closeEditor = () => {
+            syncPreview(textarea);
+            editor.classList.remove("is-open");
+            preview.style.display = "";
+          };
+
+          preview.addEventListener("click", openEditor);
+          textarea.addEventListener("blur", closeEditor);
+          textarea.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              textarea.blur();
+            }
+          });
+        });
+
+        if (container) {
+          renderMath(container);
         }
       });
     </script>

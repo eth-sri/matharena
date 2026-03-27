@@ -11,6 +11,8 @@ from matplotlib import rcParams
 from human_score_data import human_scores
 from datetime import datetime
 
+from matharena.json_zst import OUTPUT_JSON_SUFFIX, load_json_zst
+
 rcParams['pdf.fonttype'] = 42
 rcParams['ps.fonttype'] = 42
 rcParams['text.usetex'] = False
@@ -103,10 +105,11 @@ def get_scores(comps, output_folder, competition_config_folder, all_existing_con
             results = []
             costs_here = []
             for i in range(1, n_problems + 1):
-                if not os.path.exists(f"{output_folder}/{comp}/{config_path}/{i}.json"):
-                    logger.warning(f"File {output_folder}/{comp}/{config_path}/{i}.json does not exist")
+                output_path = f"{output_folder}/{comp}/{config_path}/{i}{OUTPUT_JSON_SUFFIX}"
+                if not os.path.exists(output_path):
+                    logger.warning(f"File {output_path} does not exist")
                     break
-                results_prob = json.load(open(f"{output_folder}/{comp}/{config_path}/{i}.json", "r"))
+                results_prob = load_json_zst(output_path)
                 correct = results_prob["correct"] if "usamo" not in comp else [
                     judgment["points"] / 7 for judgment in results_prob["judgment"][0]
                 ]

@@ -2,14 +2,14 @@ MODEL=$1
 DEFAULT_N=4
 
 COMPS=(
-  "aime/aime_2025"
+  # "aime/aime_2025"
   "aime/aime_2026"
   "hmmt/hmmt_feb_2026"
-  "hmmt/hmmt_feb_2025"
-  "hmmt/hmmt_nov_2025"
-  "smt/smt_2025"
-  "brumo/brumo_2025"
-  "cmimc/cmimc_2025"
+  # "hmmt/hmmt_feb_2025"
+  # "hmmt/hmmt_nov_2025"
+  # "smt/smt_2025"
+  # "brumo/brumo_2025"
+  # "cmimc/cmimc_2025"
   "apex/shortlist_2025"
   "arxiv/december"
   "arxiv/january"

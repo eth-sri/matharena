@@ -1,0 +1,22 @@
+model: Qwen/Qwen3.5-9B
+api: together
+max_tokens: 192000
+temperature: 1.0
+top_p: 0.95
+presence_penalty: 1.5
+extra_body:
+  top_k: 20
+  min_p: 0.0
+  repetition_penalty: 1.0
+concurrent_requests: 64
+read_cost: 0.1
+write_cost: 0.15
+human_readable_id: Qwen3.5-9B
+date: "2026-03-02"
+other_params:
+  open: true
+  creator: Qwen
+  parameters: 9.0
+  active_parameters: 9.0
+  huggingface_id: Qwen/Qwen3.5-9B
+

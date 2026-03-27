@@ -89,7 +89,7 @@
         }
         .editable-display {
             cursor: text;
-            white-space: pre-wrap;
+            white-space: normal;
             font-weight: normal;
         }
         .editable-box {
@@ -97,7 +97,7 @@
         }
         .editable-box > .editable-display {
             display: block;
-            white-space: pre-wrap;
+            white-space: normal;
         }
         .edit-textarea {
             width: 100%;
@@ -244,31 +244,12 @@
     </div>
 
     <script id="HighlightJS" src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
     <script>
         const CURRENT_COMP = {{ current_comp | tojson }};
-
-        function renderMath(el) {
-            if (window.renderMathInElement) {
-                renderMathInElement(el, {
-                    delimiters: [
-                        { left: '$$', right: '$$', display: true },
-                        { left: '$', right: '$', display: false },
-                        { left: '\\(', right: '\\)', display: false },
-                        { left: '\\[', right: '\\]', display: true }
-                    ],
-                    throwOnError: false
-                });
-            }
-        }
-
-        function normalizeEditableDisplay(box) {
-            const display = box.querySelector('.editable-display');
-            const raw = box.querySelector('.raw-source');
-            if (!display || !raw) return;
-            display.textContent = raw.value.trim();
-        }
 
         async function saveEdit(box, value) {
             const payload = {
@@ -295,80 +276,19 @@
             }
         }
 
-        function attachEditable(box) {
-            const display = box.querySelector('.editable-display');
-            const raw = box.querySelector('.raw-source');
-            const status = box.querySelector('.save-status');
-            if (!display || !raw || !status) return;
-
-            display.addEventListener('click', () => {
-                if (box.dataset.editing === '1') return;
-                box.dataset.editing = '1';
-
-                const textarea = document.createElement('textarea');
-                textarea.className = 'edit-textarea';
-                textarea.value = raw.value;
-                const targetHeight = Math.max(display.offsetHeight, box.offsetHeight - 30, 120);
-                textarea.style.height = `${targetHeight}px`;
-
-                display.style.display = 'none';
-                box.insertBefore(textarea, status);
-                textarea.focus();
-
-                let closed = false;
-                const finish = async (save) => {
-                    if (closed) return;
-                    closed = true;
-                    const newValue = textarea.value;
-                    textarea.remove();
-                    box.dataset.editing = '0';
-
-                    if (!save || newValue === raw.value) {
-                        display.style.display = '';
-                        return;
-                    }
-
-                    status.textContent = 'Saving...';
-                    try {
-                        await saveEdit(box, newValue);
-                        raw.value = newValue;
-                        display.textContent = newValue.trim();
-                        display.style.display = '';
-                        renderMath(display);
-                        status.textContent = 'Saved.';
-                        setTimeout(() => { status.textContent = ''; }, 1200);
-                    } catch (err) {
-                        display.style.display = '';
-                        status.textContent = String(err.message || 'Save failed.');
-                    }
-                };
-
-                textarea.addEventListener('keydown', (e) => {
-                    if (e.key === 'Escape') {
-                        e.preventDefault();
-                        finish(false);
-                    }
-                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                        e.preventDefault();
-                        textarea.blur();
-                    }
-                });
-                textarea.addEventListener('blur', () => finish(true));
-            });
-        }
-
         function initializeEditPage() {
             document.querySelectorAll('.editable-box').forEach((box) => {
-                normalizeEditableDisplay(box);
-                attachEditable(box);
+                const display = box.querySelector('.editable-display');
+                const raw = box.querySelector('.raw-source');
+                renderMarkedText(display, raw.value.trim());
+                attachInlineTextareaEditor(box, async (value) => {
+                    await saveEdit(box, value);
+                    return value;
+                });
             });
-            document.querySelectorAll('.editable-display').forEach(renderMath);
         }
 
         document.addEventListener('DOMContentLoaded', initializeEditPage);
-        window.addEventListener('load', () => {
-            document.querySelectorAll('.editable-display').forEach(renderMath);
-        });
     </script>
 </body>
 </html>

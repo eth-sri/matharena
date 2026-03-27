@@ -1,0 +1,2 @@
+model_config: xai/grok-41-fast-reasoning
+scaffold_config: judges/simple_judge

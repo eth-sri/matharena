@@ -154,6 +154,7 @@ class BaseAgent:
             self._find_full_run_id()
         checkpoint_path = f"{self.checkpoint_base_dir}/{self.RUN_ID_FULL}.json"
         logger.info(f"[{self.bi}] Saving checkpoint to {checkpoint_path}.")
+        os.makedirs(self.checkpoint_base_dir, exist_ok=True)
         with open(checkpoint_path, "w") as f:
             json.dump(
                 {

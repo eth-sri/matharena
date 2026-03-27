@@ -1,0 +1,2 @@
+model_config: gemini/gemini-31-pro
+scaffold_config: judges/simple_judge

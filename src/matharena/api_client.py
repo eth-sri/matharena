@@ -106,8 +106,8 @@ class APIClient:
         if "--" in model:
             model, reasoning_effort = model.split("--")
             logger.info(f"Model: {model}, Reasoning effort: {reasoning_effort}")
-        if api not in ["anthropic", "openai"] and batch_processing:
-            logger.warning("Batch processing is only supported for the Anthropic API and OpenAI API.")
+        if (api not in ["anthropic", "openai"] or self.tool_calls_allowed) and batch_processing:
+            logger.warning("Batch processing is only supported for the Anthropic API and OpenAI API without tool calling.")
             batch_processing = False
         if ("o1" in model or "o3" in model or "o4" in model or "gpt-5" in model) and api == "openai":
             logger.info("Not using system messages for o1/o3/o4 model.")
@@ -174,21 +174,25 @@ class APIClient:
         self.terminated = False
         self._initialize_api_keys()
 
+        
         # VLLM-specific initialization
         if self.api == "vllm":
+            self.vllm_model = None
+
+    def _initialize_vllm(self):
             if LLM is None:
                 raise ImportError("vllm is not installed. pip install vllm")
             self.tokenizer = AutoTokenizer.from_pretrained(self.model)
             vllm_args = {}
 
-            for p in ("temperature", "top_p", "max_tokens"):
+            for p in ("temperature", "top_p", "max_tokens", "top_k", "repetition_penalty", "presence_penalty"):
                 if p in self.kwargs:
                     vllm_args[p] = self.kwargs.pop(p)
             self.sampling_params = SamplingParams(**vllm_args)
             self.vllm_model = LLM(
-                model=self.model, tensor_parallel_size=4 if "n_gpus" not in kwargs else kwargs["n_gpus"]
+                model=self.model, tensor_parallel_size=len(os.environ['CUDA_VISIBLE_DEVICES'].split(","))
             )
-            logger.info(f"Loaded local vllm model `{self.model}` with sampling {kwargs}")
+            logger.info(f"Loaded local vllm model `{self.model}` with sampling {self.kwargs}")
 
     def terminate(self):
         """Terminates the APIClient."""
@@ -577,6 +581,8 @@ class APIClient:
         Yields:
             tuple: An (idx, conversation, detailed_cost) tuple.
         """
+        if self.vllm_model is None:
+            self._initialize_vllm()
         tasks = []
         for idx, query in enumerate(queries):
             query_in_template = self.tokenizer.apply_chat_template(query, tokenize=False, add_generation_prompt=True)
@@ -598,8 +604,8 @@ class APIClient:
             else:
                 text = out.text
             conversation = [m.copy() for m in queries[idx]] + [{"role": "assistant", "content": text}]
-            inp = getattr(out, "n_input_tokens", 0)
-            outp = getattr(out, "n_output_tokens", 0)
+            inp = len(self.tokenizer.apply_chat_template(queries[idx], tokenize=True, add_generation_prompt=True,enable_thinking=True)['input_ids'])
+            outp = len(out.token_ids)
             detailed_cost = {
                 "cost": self._get_cost(inp, outp, cached_input_tokens=0),
                 "input_tokens": inp,
@@ -1263,7 +1269,7 @@ class APIClient:
             InternalRequestResult or None
         """
         if is_together:
-            client = Together()
+            client = Together(timeout=self.timeout, max_retries=0)
         else:
             client = OpenAI(api_key=self.api_key, base_url=self.base_url, timeout=self.timeout, max_retries=0)
 
@@ -1335,7 +1341,7 @@ class APIClient:
                     if self.background:
                         time_start = time.time()
                         while response.status in {"queued", "in_progress"}:
-                            time.sleep(15)
+                            time.sleep(60)
                             response = client.responses.retrieve(response.id)
                             if time.time() - time_start > self.timeout:
                                 raise TimeoutError("Timeout waiting for background response.")

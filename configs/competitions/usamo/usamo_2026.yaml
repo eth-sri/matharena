@@ -1,0 +1,10 @@
+instruction: |
+  Generate a rigorous proof for the following problem:
+strict_parsing: false
+n_problems: 6
+date: "2026-03-22"
+final_answer: false
+dataset_path: MathArena/usamo_2026
+grading_scheme_creator_config: grading_scheme_creator
+judge_configs:
+  - judges/main_judge

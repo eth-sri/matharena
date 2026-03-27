@@ -32,6 +32,7 @@ dependencies = [
     "playwright>=1.52.0",
     "python-dotenv>=1.1.1",
     "thefuzz>=0.22.1",
+    "zstandard>=0.23.0",
     "sentence_transformers>=5.0.0",
     "transformers>=4.55.0",
     "pyyaml>=6.0",

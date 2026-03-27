@@ -12,12 +12,57 @@ APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 PAPER_ROOT = os.path.join(APP_ROOT, "paper")
 ANNOTATION_FILENAME = "annotation.json"
 LLM_ANNOTATION_FILENAME = "llm_annotation.json"
+LLM_FALSE_FILENAME = "llm_metadata_false.json"
 CHECK_ONLY = False
 CHECK_ONLY_KEPT = False
+FALSE_MODE = False
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret")
 SKIPPED_BY_SESSION = {}
+
+
+def get_field_specs():
+    if FALSE_MODE:
+        return [
+            {
+                "name": "original_statement",
+                "label": "Original statement",
+                "placeholder": "Extract the original theorem statement.",
+                "empty_text": "No original statement entered yet.",
+                "height": 220,
+            },
+            {
+                "name": "perturbed_statement",
+                "label": "Perturbed statement",
+                "placeholder": "Write the plausible false perturbation.",
+                "empty_text": "No perturbed statement entered yet.",
+                "height": 220,
+            },
+            {
+                "name": "falsity_explanation",
+                "label": "Why false given the original",
+                "placeholder": "Explain why the perturbed statement is false in light of the original statement.",
+                "empty_text": "No falsity explanation entered yet.",
+                "height": 180,
+            },
+        ]
+    return [
+        {
+            "name": "question",
+            "label": "Question to extract",
+            "placeholder": "What question should we extract from this entry?",
+            "empty_text": "No question entered yet.",
+            "height": 300,
+        },
+        {
+            "name": "answer",
+            "label": "Verifiable answer",
+            "placeholder": "Provide the unique, verifiable answer.",
+            "empty_text": "No answer entered yet.",
+            "height": 160,
+        },
+    ]
 
 
 def is_annotated(paper_id):
@@ -63,7 +108,7 @@ def load_metadata(paper_id):
 
 
 def load_annotation(paper_id, check_only=False):
-    filename = LLM_ANNOTATION_FILENAME if check_only else ANNOTATION_FILENAME
+    filename = LLM_FALSE_FILENAME if FALSE_MODE else LLM_ANNOTATION_FILENAME if check_only else ANNOTATION_FILENAME
     path = os.path.join(PAPER_ROOT, paper_id, filename)
     if not os.path.isfile(path):
         return {}
@@ -72,7 +117,7 @@ def load_annotation(paper_id, check_only=False):
 
 
 def save_annotation(paper_id, data, check_only=False):
-    filename = LLM_ANNOTATION_FILENAME if check_only else ANNOTATION_FILENAME
+    filename = LLM_FALSE_FILENAME if FALSE_MODE else LLM_ANNOTATION_FILENAME if check_only else ANNOTATION_FILENAME
     path = os.path.join(PAPER_ROOT, paper_id, filename)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, sort_keys=True)
@@ -137,10 +182,10 @@ def paper_view(paper_id):
         review = annotation.get("review")
         if isinstance(review, dict):
             annotation = annotation.copy()
-            if "question" in review:
-                annotation["question"] = review.get("question")
-            if "answer" in review:
-                annotation["answer"] = review.get("answer")
+            for field in get_field_specs():
+                name = field["name"]
+                if name in review:
+                    annotation[name] = review.get(name)
     index = paper_ids.index(paper_id)
     next_id = paper_ids[index + 1] if index + 1 < len(paper_ids) else None
     prev_id = paper_ids[index - 1] if index > 0 else None
@@ -154,6 +199,7 @@ def paper_view(paper_id):
         position=index + 1,
         total=len(paper_ids),
         check_only=CHECK_ONLY,
+        field_specs=get_field_specs(),
     )
 
 
@@ -162,8 +208,10 @@ def annotate(paper_id):
     if load_metadata(paper_id) is None:
         abort(404)
     status = request.form.get("status", "").strip().lower()
-    question = (request.form.get("question") or "").strip()
-    answer = (request.form.get("answer") or "").strip()
+    field_values = {
+        field["name"]: (request.form.get(field["name"]) or "").strip()
+        for field in get_field_specs()
+    }
     if status not in {"keep", "discard"}:
         status = ""
     if CHECK_ONLY:
@@ -176,8 +224,7 @@ def annotate(paper_id):
         review_status = status if status in {"keep", "discard"} else "keep"
         annotation["review"] = {
             "status": review_status,
-            "question": question,
-            "answer": answer,
+            **field_values,
             "updated_at": datetime.utcnow().isoformat() + "Z",
         }
         save_annotation(paper_id, annotation, check_only=True)
@@ -194,8 +241,7 @@ def annotate(paper_id):
         return redirect(url_for("done"))
     annotation = {
         "status": status,
-        "question": question,
-        "answer": answer,
+        **field_values,
         "updated_at": datetime.utcnow().isoformat() + "Z",
     }
     save_annotation(paper_id, annotation)
@@ -242,8 +288,10 @@ if __name__ == "__main__":
         action="store_true",
         help="In check mode, only show papers previously marked keep in review.",
     )
+    parser.add_argument("--false", action="store_true", help="Use the false-statement pipeline metadata.")
     parser.add_argument("--port", type=int, default=5000, help="Port to run the web server on.")
     args = parser.parse_args()
     CHECK_ONLY = args.check or args.check_kept
     CHECK_ONLY_KEPT = args.check_kept
+    FALSE_MODE = args.false
     app.run(debug=True, port=args.port)

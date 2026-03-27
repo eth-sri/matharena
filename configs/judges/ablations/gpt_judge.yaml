@@ -1,0 +1,2 @@
+model_config: openai/gpt-52-high
+scaffold_config: judges/simple_judge

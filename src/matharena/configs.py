@@ -7,6 +7,8 @@ from pathlib import Path
 import yaml
 from loguru import logger
 
+from matharena.json_zst import load_json_zst
+
 
 def check_valid_config(config):
     """Checks if a configuration is valid.
@@ -121,8 +123,7 @@ def extract_existing_configs(
             exists = True
             if not is_final_answer:
                 for file in os.listdir(os.path.join(root_dir, comp, config_path)):
-                    with open(os.path.join(root_dir, comp, config_path, file), "r", encoding="utf-8") as f:
-                        data = json.load(f)
+                    data = load_json_zst(os.path.join(root_dir, comp, config_path, file))
                     if "judgment" not in data and not allow_non_existing_judgment:
                         logger.warning(f"Judgment not found in {file}")
                         exists = False

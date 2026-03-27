@@ -7,6 +7,8 @@ from loguru import logger
 import yaml
 import shutil
 
+from matharena.json_zst import OUTPUT_JSON_SUFFIX, load_json_zst
+
 
 if __name__ == "__main__":
     import argparse
@@ -61,9 +63,11 @@ if __name__ == "__main__":
         # list all files in the folder
         problem_files = os.listdir(folder_model)
         for file in problem_files:
+            if not file.endswith(OUTPUT_JSON_SUFFIX):
+                continue
             file_name = os.path.join(folder_model, file)
-            problem_name = file.split(".")[0]
-            data = json.load(open(file_name, "r"))
+            problem_name = file.removesuffix(OUTPUT_JSON_SUFFIX)
+            data = load_json_zst(file_name)
             gold_answer = data["gold_answer"]
             problem = data["problem"] if not args.visual_dataset else f"{problem_name}.png"
             problem_key = "problem" if not args.visual_dataset else "file_name"
@@ -142,7 +146,6 @@ if __name__ == "__main__":
 
         # remove temp folder
         shutil.rmtree("temp")
-
 
 
 

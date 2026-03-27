@@ -10,6 +10,8 @@ import pandas as pd
 from collections import Counter
 from itertools import chain
 
+from matharena.json_zst import OUTPUT_JSON_SUFFIX, load_json_zst
+
 
 def get_latex_model_name(model):
     if model == "o4-mini (high)":
@@ -90,12 +92,11 @@ def analyze_run(args, competition):
             model_comp_dir = os.path.join(out_dir, config_path)
             results[f"{human_readable_ids[config_path]}"] = {}
             for problem_file in os.listdir(model_comp_dir):
-                if not problem_file.endswith(".json"):
+                if not problem_file.endswith(OUTPUT_JSON_SUFFIX):
                     continue
-                problem_idx = int(problem_file.split(".")[0])
-                with open(os.path.join(model_comp_dir, problem_file), "r") as f:
-                    data = json.load(f)
-                    results[f"{human_readable_ids[config_path]}"][problem_idx] = data
+                problem_idx = int(problem_file.removesuffix(OUTPUT_JSON_SUFFIX))
+                data = load_json_zst(os.path.join(model_comp_dir, problem_file))
+                results[f"{human_readable_ids[config_path]}"][problem_idx] = data
         return results
     else:
         problem_data = load_dataset(data_location)['train'].to_pandas()
@@ -176,4 +177,3 @@ if __name__ == '__main__':
     print(results_summary.explode('types').groupby(['comp', 'types'])['problem'].nunique())
 
     print(generate_type_table(results_summary))
-

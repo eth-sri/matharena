@@ -2,5 +2,5 @@ instruction: "Put your final answer within \\boxed{{}}."
 strict_parsing: false
 n_problems: 33
 date: "2026-02-14"
-dataset_path: MathArena/hmmt_feb_2026
+dataset_path: data/hmmt/hmmt_feb_2026
 huggingface_id: MathArena/hmmt_feb_2026

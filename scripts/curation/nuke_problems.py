@@ -26,6 +26,8 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Set
 
+from matharena.json_zst import OUTPUT_JSON_SUFFIX, dump_json_zst, load_json_zst
+
 
 def parse_problem_ids(problem_ids: List[str]) -> Set[int]:
     """Convert string IDs to integer IDs."""
@@ -179,20 +181,17 @@ def reorder_files(directory: str, permutation: List[int], extension: str, update
 
             if update_json_content:
                 try:
-                    with open(temp_name, 'r+', encoding='utf-8') as f:
-                        data = json.load(f)
-                        if isinstance(data, dict) and 'idx' in data:
-                            data['idx'] = new_id
-                            f.seek(0)
-                            json.dump(data, f, indent=4, ensure_ascii=False)
-                            f.truncate()
+                    data = load_json_zst(temp_name)
+                    if isinstance(data, dict) and 'idx' in data:
+                        data['idx'] = new_id
+                        dump_json_zst(data, temp_name, indent=4, ensure_ascii=False)
                     print(f"  Updated idx in temp file for new problem {new_id}")
-                except (json.JSONDecodeError, IOError) as e:
+                except IOError as e:
                     print(f"  Error updating {old_file}: {e}")
 
     # Rename from temp to final
     for temp_file in temp_files:
-        new_id_str = temp_file.stem.split('_')[1]
+        new_id_str = temp_file.name.removesuffix(extension).split('_')[1]
         final_name = dir_path / f"{new_id_str}{extension}"
         temp_file.rename(final_name)
         print(f"Renamed file to {final_name.name}")
@@ -210,9 +209,9 @@ def reorder_json_outputs(outputs_dir: str, permutation: List[int]):
         return
 
     for subdir in outputs_path.rglob("*"):
-        if subdir.is_dir() and any(subdir.glob("*.json")):
+        if subdir.is_dir() and any(subdir.glob(f"*{OUTPUT_JSON_SUFFIX}")):
             print(f"Processing JSON files in {subdir}")
-            reorder_files(str(subdir), permutation, ".json", update_json_content=True)
+            reorder_files(str(subdir), permutation, OUTPUT_JSON_SUFFIX, update_json_content=True)
 
 def update_csv_files(source_csv_path: str, source_metadata_csv_path: str, answers_csv_path: str,
                      ids_to_remove: Set[int], has_source_csv: bool, has_source_metadata_csv: bool,
@@ -457,25 +456,26 @@ def update_json_outputs(outputs_dir: str, ids_to_remove: Set[int],
     
     # Find all subdirectories with JSON files
     for subdir in outputs_path.rglob("*"):
-        if subdir.is_dir() and any(subdir.glob("*.json")):
+        if subdir.is_dir() and any(subdir.glob(f"*{OUTPUT_JSON_SUFFIX}")):
             print(f"Processing JSON files in {subdir}")
             
             # Remove files for deleted problems
             for problem_id in ids_to_remove:
-                json_file = subdir / f"{problem_id}.json"
+                json_file = subdir / f"{problem_id}{OUTPUT_JSON_SUFFIX}"
                 if json_file.exists():
                     move_path = str(subdir).replace(str(outputs_path), str(outputs_dir_to)) if outputs_dir_to else None
-                    move_filename = f"{n_to_problems + sorted_ids_to_remove.index(problem_id) + 1}.json" if outputs_dir_to else None
+                    move_filename = (
+                        f"{n_to_problems + sorted_ids_to_remove.index(problem_id) + 1}{OUTPUT_JSON_SUFFIX}"
+                        if outputs_dir_to else None
+                    )
                     if move_path and move_filename:
                         target_dir = Path(move_path)
                         target_dir.mkdir(parents=True, exist_ok=True)
                         target_file = target_dir / move_filename
                         shutil.move(str(json_file), str(target_file))
-                        with open(target_file, 'r', encoding='utf-8') as f:
-                            data = json.load(f)
-                            data["idx"] = n_to_problems + sorted_ids_to_remove.index(problem_id) + 1
-                        with open(target_file, 'w', encoding='utf-8') as f:
-                            json.dump(data, f, indent=4, ensure_ascii=False)
+                        data = load_json_zst(target_file)
+                        data["idx"] = n_to_problems + sorted_ids_to_remove.index(problem_id) + 1
+                        dump_json_zst(data, target_file, indent=4, ensure_ascii=False)
                         print(f"  Moved {json_file} to {target_file}")
                     else:
                         json_file.unlink()
@@ -483,9 +483,9 @@ def update_json_outputs(outputs_dir: str, ids_to_remove: Set[int],
             
             # Get existing JSON files and their IDs
             existing_files = []
-            for json_file in subdir.glob("*.json"):
+            for json_file in subdir.glob(f"*{OUTPUT_JSON_SUFFIX}"):
                 try:
-                    old_id = int(json_file.stem)
+                    old_id = int(json_file.name.removesuffix(OUTPUT_JSON_SUFFIX))
                     if old_id not in ids_to_remove:
                         existing_files.append((old_id, json_file))
                 except ValueError:
@@ -500,30 +500,28 @@ def update_json_outputs(outputs_dir: str, ids_to_remove: Set[int],
             for new_id, (old_id, old_file) in enumerate(existing_files, 1):
                 # Read and update JSON content
                 try:
-                    with open(old_file, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
+                    data = load_json_zst(old_file)
                     
                     # Update idx field if it exists
                     if isinstance(data, dict) and 'idx' in data:
                         data['idx'] = new_id
                     
                     # Write to temporary file
-                    temp_name = subdir / f"temp_{new_id}.json"
-                    with open(temp_name, 'w', encoding='utf-8') as f:
-                        json.dump(data, f, indent=4, ensure_ascii=False)
+                    temp_name = subdir / f"temp_{new_id}{OUTPUT_JSON_SUFFIX}"
+                    dump_json_zst(data, temp_name, indent=4, ensure_ascii=False)
                     
                     temp_files.append((new_id, temp_name, old_file))
                     
-                except (json.JSONDecodeError, IOError) as e:
+                except IOError as e:
                     print(f"  Error processing {old_file}: {e}")
                     continue
             
             # Remove old files and rename temp files
             for new_id, temp_file, old_file in temp_files:
                 old_file.unlink()  # Remove old file
-                final_file = subdir / f"{new_id}.json"
+                final_file = subdir / f"{new_id}{OUTPUT_JSON_SUFFIX}"
                 temp_file.rename(final_file)  # Rename temp to final
-                print(f"  Updated and renamed to {new_id}.json")
+                print(f"  Updated and renamed to {new_id}{OUTPUT_JSON_SUFFIX}")
 
 def main():
     parser = argparse.ArgumentParser(description="Remove or reorder problems in a competition dataset.")

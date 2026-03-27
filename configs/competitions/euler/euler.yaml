@@ -45,6 +45,9 @@ date:
   '984': '2026-02-14'
   '985': '2026-02-21'
   '986': '2026-03-01'
+  '987': '2026-03-08'
+  '988': '2026-03-15'
+  '989': '2026-03-22'
 instruction: "You are solving a problem from Project Euler. \nAs a tool you can use,\
   \ you are given access to a code execution environment. Invoke that tool to execute\
   \ Python or C++ code. You can execute code up to 500 times, so you can use them\
@@ -59,7 +62,7 @@ instruction: "You are solving a problem from Project Euler. \nAs a tool you can 
   \ your final answer within \\boxed{{}}, i.e., end your reply with \"### Final answer:\
   \ \\\\boxed{{your_answer_here}}\".\n"
 max_tool_calls: 200
-n_problems: 44
+n_problems: 47
 strict_parsing: false
 tools:
 - tool_spec:

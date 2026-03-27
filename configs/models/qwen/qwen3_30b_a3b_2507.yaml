@@ -1,0 +1,16 @@
+model: Qwen/Qwen3-30B-A3B-Thinking-2507
+api: vllm
+max_tokens: 81920
+temperature: 0.6
+top_p: 0.95
+concurrent_requests: 10
+read_cost: 0.1
+write_cost: 0.3
+human_readable_id: Qwen3-30B-A3B-2507-Think
+date: "2025-07-25"
+other_params:
+  open: true
+  creator: Qwen
+  parameters: 30
+  active_parameters: 3
+  huggingface_id: Qwen/Qwen3-30B-A3B-Thinking-2507

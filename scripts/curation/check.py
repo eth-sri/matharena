@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from matharena.api_client import APIClient
+from matharena.json_zst import OUTPUT_JSON_SUFFIX, dump_json_zst, load_json_zst
 
 def _parse_bool(text):
     if text is None:
@@ -72,7 +73,7 @@ Does the model reply contain a correct final answer? Reply only with "true" or "
 def _iter_json_files(output_root):
     for root, _, files in os.walk(output_root):
         for name in files:
-            if name.endswith(".json"):
+            if name.endswith(OUTPUT_JSON_SUFFIX):
                 yield Path(root) / name
 
 
@@ -102,8 +103,7 @@ def main():
 
     for json_path in _iter_json_files(output_root):
         total_files += 1
-        with json_path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = load_json_zst(json_path)
         file_cache[json_path] = data
 
         correct = data.get("correct", [])
@@ -140,8 +140,7 @@ def main():
                 continue
             data = file_cache[json_path]
             data["llm_annotation"][run_idx] = parsed
-            with json_path.open("w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=4)
+            dump_json_zst(data, json_path, ensure_ascii=False, indent=4)
         logger.info(f"Processed {len(pending)} incorrect runs, total cost: {total_cost:.4f}")
 
 if __name__ == "__main__":

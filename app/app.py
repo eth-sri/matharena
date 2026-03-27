@@ -1,5 +1,6 @@
 
 import argparse
+import copy
 import csv
 import json
 import os
@@ -11,6 +12,7 @@ from pyparsing import srange
 from torch import ScriptDict
 
 from matharena.configs import extract_existing_configs
+from matharena.json_zst import OUTPUT_JSON_SUFFIX, dump_json_zst, load_json_zst
 from matharena.utils import normalize_conversation
 
 """
@@ -78,12 +80,11 @@ def analyze_run(competition, models):
         model_comp_dir = os.path.join(out_dir, config_path)
         results[f"{human_readable_ids[config_path]}"] = {}
         for problem_file in os.listdir(model_comp_dir):
-            if not problem_file.endswith(".json"):
+            if not problem_file.endswith(OUTPUT_JSON_SUFFIX):
                 continue
-            problem_idx = int(problem_file.split(".")[0])
-            with open(os.path.join(model_comp_dir, problem_file), "r", encoding="utf-8") as f:
-                data = json.load(f)
-                results[f"{human_readable_ids[config_path]}"][problem_idx] = data
+            problem_idx = int(problem_file.removesuffix(OUTPUT_JSON_SUFFIX))
+            data = load_json_zst(os.path.join(model_comp_dir, problem_file))
+            results[f"{human_readable_ids[config_path]}"][problem_idx] = data
     return results
 
 def load_sources(comp):
@@ -284,7 +285,6 @@ def _find_or_create_grading_row(rows, problem_id):
 
 # Analyze run
 results = analyze_run(current_comp, args.models)
-boxes_expanded = False
 
 # Get problem names
 sources = load_sources(current_comp)
@@ -417,41 +417,7 @@ def model_stats_to_html(stats):
     }
 
 
-def parse_messages_response(response):
-    # This is a list of messages
-    response_str = response[0]["content"]
-    for i in range(1, len(response)):
-        if response[i]["role"] == "assistant":
-            response_str += "\n\n" + 30 * "=" + "Assistant" + 30 * "=" + "\n\n" + response[i]["content"]
-        else:
-            response_str += "\n\n" + 30 * "=" + "User" + 30 * "=" + "\n\n" + response[i]["content"]
-    return response_str
-
-
-def sanitize_response(response):
-    response = response.replace("\\( ", "$")
-    response = response.replace(" \\)", "$")
-    response = response.replace("\\(", "$")
-    response = response.replace("\\)", "$")
-
-    response = response.replace("\\[ ", "$$")
-    response = response.replace(" \\]", "$$")
-    response = response.replace("\\[", "$$")
-    response = response.replace("\\]", "$$")
-    return response
-
-
 ###### results
-
-
-@app.route("/expand/<path:url>/<int:expanded>")
-def expand(url, expanded):
-    global boxes_expanded
-    boxes_expanded = bool(expanded)
-    if not url:
-        return redirect(url_for("index"))
-    url = "/view/" + url.replace(">>>", "/")
-    return redirect(url)
 
 
 @app.route("/refresh/<comp>", defaults={"url": ""})
@@ -523,7 +489,6 @@ def model_view(model):
         sidebar=sidebar_contents,
         model=model,
         stats=stats_html,
-        boxes_expanded=boxes_expanded,
     )
 
 
@@ -532,6 +497,7 @@ def render_message(message):
     tagline = ""
     content = ""
     code = None
+    is_cot = False
 
     if role == "developer":
         tagline = "System Prompt / Developer Message"
@@ -545,6 +511,7 @@ def render_message(message):
         typ = message.get("type")
         if typ == "cot":
             tagline = "Assistant (Chain-of-Thought)"
+            is_cot = True
         elif typ == "response":
             tagline = "Assistant"
         elif typ == "tool_call":
@@ -596,8 +563,26 @@ def render_message(message):
     else:
         content = {"text": str(content).strip(), "img": None}
         
-    return {"tagline": tagline, "content": content, "code": code, "role": role}
+    return {"tagline": tagline, "content": content, "code": code, "role": role, "is_cot": is_cot}
 
+
+def render_conversation_html(conversation):
+    messages_html = ""
+    for i, message in enumerate(conversation):
+        is_last_message = i == len(conversation) - 1
+        msg_data = render_message(message)
+
+        if (
+            message.get("role") == "assistant"
+            and not msg_data["content"]["text"]
+            and not msg_data["content"]["img"]
+            and not msg_data["code"]
+            and not is_last_message
+        ):
+            continue
+
+        messages_html += render_template("message.html", **msg_data)
+    return messages_html
 
 
 @app.route("/modelinteraction/<id>")
@@ -624,22 +609,7 @@ def model_interaction(id):
     else:
         model, problem_name, i = tokens
         conversation = results[model][int(problem_name)]["messages"][int(i)]
-        messages_html = ""
-        for i, message in enumerate(conversation):
-            is_last_message = i == len(conversation) - 1
-            msg_data = render_message(message)
-
-            if (
-                message.get("role") == "assistant"
-                and not msg_data["content"]["text"]
-                and not msg_data["content"]["img"]
-                and not msg_data["code"]
-                and not is_last_message
-            ):
-                continue
-
-            messages_html += render_template("message.html", **msg_data)
-        return messages_html
+        return render_conversation_html(conversation)
 
 
 @app.route("/historystep/<id>")
@@ -658,23 +628,7 @@ def history_step(id):
     if target_step is None:
         return "<div class=\"error\">Step not found</div>"
 
-    conversation = target_step["messages"]
-    messages_html = ""
-    for i, message in enumerate(conversation):
-        is_last_message = i == len(conversation) - 1
-        msg_data = render_message(message)
-
-        if (
-            message.get("role") == "assistant"
-            and not msg_data["content"]["text"]
-            and not msg_data["content"]["img"]
-            and not msg_data["code"]
-            and not is_last_message
-        ):
-            continue
-
-        messages_html += render_template("message.html", **msg_data)
-    return messages_html
+    return render_conversation_html(target_step["messages"])
 
 @app.route('/data/<path:filename>')
 def data_files(filename):
@@ -707,50 +661,89 @@ def _format_score_value(value):
     return value
 
 
+def _judgment_rows(raw_judgment):
+    legacy_shape = bool(raw_judgment) and all(item is None or isinstance(item, dict) for item in raw_judgment)
+    return ([raw_judgment] if legacy_shape else raw_judgment), legacy_shape
+
+
+def _judgment_entry_to_text(entry):
+    blocks = []
+    if entry.get("error"):
+        blocks.append(str(entry["error"]).strip())
+
+    for detail in entry.get("details", []):
+        desc = str(detail.get("desc", "")).strip()
+        if desc:
+            blocks.append(desc)
+
+    return "\n\n".join(block for block in blocks if block).strip()
+
+
+def _format_additional_info_value(value):
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, indent=2).strip()
+    return str(value).strip()
+
+
+def _judgment_additional_info(entry):
+    raw_info = entry.get("additional_info") or {}
+    if isinstance(raw_info, dict):
+        items = raw_info.items()
+    else:
+        items = [("value", raw_info)]
+
+    return [
+        {
+            "key": str(key),
+            "value": _format_additional_info_value(value),
+        }
+        for key, value in items
+        if _format_additional_info_value(value)
+    ]
+
+
+def _judgment_without_cost(entry):
+    entry = copy.deepcopy(entry)
+    entry.pop("cost", None)
+    return entry
+
+
 def get_run_judgments(res, run_idx):
-    raw_judgment = res.get("judgment", [])
-    if not isinstance(raw_judgment, list):
-        return []
-
-    # Legacy shape: judgment is a single list of per-run entries.
-    if raw_judgment and all(item is None or isinstance(item, dict) for item in raw_judgment):
-        raw_judgment = [raw_judgment]
-
-    output = []
-    for judge_idx, judge_runs in enumerate(raw_judgment, start=1):
-        if not isinstance(judge_runs, list) or run_idx >= len(judge_runs):
-            continue
-        entry = judge_runs[run_idx]
-        if not isinstance(entry, dict):
-            continue
-        details = []
-        for detail in entry.get("details", []):
-            if not isinstance(detail, dict):
-                continue
-            detail_copy = detail.copy()
-            if "points" in detail_copy:
-                detail_copy["points"] = _format_score_value(detail_copy["points"])
-            if "max_points" in detail_copy:
-                detail_copy["max_points"] = _format_score_value(detail_copy["max_points"])
-            details.append(detail_copy)
-        output.append(
-            {
-                "judge_idx": judge_idx,
-                "points": _format_score_value(entry.get("points")),
-                "max_points": _format_score_value(entry.get("max_points")),
-                "details": details,
-                "error": entry.get("error"),
-            }
-        )
-    return output
+    judgment_rows, _ = _judgment_rows(res.get("judgment", []))
+    return [
+        {
+            "judge_idx": judge_idx,
+            "points": _format_score_value(entry.get("points")),
+            "max_points": _format_score_value(entry.get("max_points")),
+            "details": [
+                {
+                    **detail,
+                    "points": _format_score_value(detail.get("points")) if "points" in detail else detail.get("points"),
+                    "max_points": _format_score_value(detail.get("max_points")) if "max_points" in detail else detail.get("max_points"),
+                }
+                for detail in entry.get("details", [])
+            ],
+            "error": entry.get("error"),
+            "editable_text": _judgment_entry_to_text(entry),
+            "additional_info": _judgment_additional_info(entry),
+            "manual_overwrite": "original_judgment" in entry,
+            "original_judgment": entry.get("original_judgment"),
+        }
+        for judge_idx, judge_runs in enumerate(judgment_rows, start=1)
+        if judge_runs is not None
+        for entry in [judge_runs[run_idx]]
+        if entry is not None
+    ]
 
 
 @app.route("/view/<model>/<problem_name>")
 def problem_view(model, problem_name):
     sidebar_contents = {
         "dropdown": {"all_comps": all_comps, "current_comp": current_comp},
-        "toggle_text": "Make Boxes Scrollable" if boxes_expanded else "Make Boxes Very Tall",
-        "expand_url": f"/expand/{model}>>>{problem_name}/{int(not boxes_expanded)}",
         "reload_url": f"/refresh/{current_comp.replace('/', '---')}/{model}>>>{problem_name}",
         "current_model": model,
         "problems": {},
@@ -842,9 +835,9 @@ def problem_view(model, problem_name):
         grading_scheme_text=grading_scheme_text,
         ground_truth_proofs=ground_truth_proofs,
         instances=instances,
-        boxes_expanded=boxes_expanded,
         is_final_answer=is_final_answer,
         is_checkpoint=False,
+        overwrite_enabled=not args.disable_overwrite,
     )
 
 
@@ -858,12 +851,11 @@ def override_result(model, problem_name, run_idx):
     if config_path is None:
         return redirect(url_for("problem_view", model=model, problem_name=problem_name))
 
-    json_path = os.path.join(args.output_folder, current_comp, config_path, f"{problem_name}.json")
+    json_path = os.path.join(args.output_folder, current_comp, config_path, f"{problem_name}{OUTPUT_JSON_SUFFIX}")
     if not os.path.exists(json_path):
         return redirect(url_for("problem_view", model=model, problem_name=problem_name))
 
-    with open(json_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    data = load_json_zst(json_path)
 
     correct = data.get("correct", [])
     if not isinstance(correct, list) or run_idx >= len(correct):
@@ -900,14 +892,144 @@ def override_result(model, problem_name, run_idx):
     except Exception:
         data["pass_at_1"] = data.get("pass_at_1")
 
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
+    dump_json_zst(data, json_path, ensure_ascii=False, indent=4)
 
     if model in results and int(problem_name) in results[model]:
         results[model][int(problem_name)]["correct"] = correct
         results[model][int(problem_name)]["manual_overwrite"] = manual_overwrite
         results[model][int(problem_name)]["llm_annotation"] = llm_annotation
         results[model][int(problem_name)]["pass_at_1"] = data["pass_at_1"]
+
+    return redirect(url_for("problem_view", model=model, problem_name=problem_name))
+
+
+def _parse_manual_points(raw_value, fallback):
+    if raw_value is None or str(raw_value).strip() == "":
+        return fallback
+    value = float(str(raw_value).strip())
+    return int(value) if value.is_integer() else value
+
+
+def _build_manual_judgment_details(source_entry, manual_points, max_points, manual_desc):
+    source_details = source_entry.get("details")
+    source_detail = source_details[0] if isinstance(source_details, list) and source_details else {}
+    if not isinstance(source_detail, dict):
+        source_detail = {}
+
+    detail = copy.deepcopy(source_detail)
+    detail["points"] = manual_points
+    detail["max_points"] = max_points
+    detail["desc"] = manual_desc
+    return [detail]
+
+
+def _normalize_run_field(values, default_value, length):
+    if not isinstance(values, list):
+        values = [default_value] * length
+    if len(values) < length:
+        values = values + [default_value] * (length - len(values))
+    elif len(values) > length:
+        values = values[:length]
+    return values
+
+
+def _as_float(value):
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _sync_manual_judgment_override(data, run_idx, judgment_entry):
+    correct = data.get("correct", [])
+    if not isinstance(correct, list) or run_idx >= len(correct):
+        return
+
+    manual_overwrite = _normalize_run_field(data.get("manual_overwrite"), False, len(correct))
+
+    points = _as_float(judgment_entry.get("points"))
+    max_points = _as_float(judgment_entry.get("max_points"))
+    if points is not None and max_points not in (None, 0):
+        correct[run_idx] = min(max(points / max_points, 0.0), 1.0)
+
+    manual_overwrite[run_idx] = True
+
+    data["correct"] = correct
+    data["manual_overwrite"] = manual_overwrite
+    try:
+        data["pass_at_1"] = sum(correct) / len(correct) if correct else 0
+    except Exception:
+        data["pass_at_1"] = data.get("pass_at_1")
+
+
+@app.route("/override_judgment/<model>/<problem_name>/<int:run_idx>/<int:judge_idx>", methods=["POST"])
+def override_judgment(model, problem_name, run_idx, judge_idx):
+    global results
+    if args.disable_overwrite:
+        abort(403)
+
+    config_path = model_id_to_config_path[model]
+    json_path = os.path.join(args.output_folder, current_comp, config_path, f"{problem_name}{OUTPUT_JSON_SUFFIX}")
+    data = load_json_zst(json_path)
+
+    judgment_rows, legacy_shape = _judgment_rows(data.get("judgment", []))
+    judge_pos = judge_idx - 1
+    current_entry = judgment_rows[judge_pos][run_idx]
+
+    original_entry = current_entry.get("original_judgment")
+    source_entry = original_entry or current_entry
+    max_points = source_entry.get("max_points", current_entry.get("max_points", 7))
+    fallback_points = current_entry.get("points", source_entry.get("points"))
+    manual_points = _parse_manual_points(request.form.get("points"), fallback_points)
+    manual_desc = request.form.get("desc", "")
+
+    updated_entry = {
+        "judge_id": source_entry.get("judge_id", f"judges/manual_{judge_idx}"),
+        "points": manual_points,
+        "max_points": max_points,
+        "details": _build_manual_judgment_details(source_entry, manual_points, max_points, manual_desc),
+        "error": None,
+        "cost": current_entry.get("cost"),
+        "additional_info": source_entry.get("additional_info", current_entry.get("additional_info", {})),
+    }
+    if original_entry is None:
+        updated_entry["original_judgment"] = _judgment_without_cost(current_entry)
+    else:
+        updated_entry["original_judgment"] = original_entry
+    judgment_rows[judge_pos][run_idx] = updated_entry
+
+    data["judgment"] = judgment_rows[0] if legacy_shape else judgment_rows
+    data.pop("judgment_original", None)
+    data.pop("judgment_manual_overwrite", None)
+    _sync_manual_judgment_override(data, run_idx, updated_entry)
+
+    dump_json_zst(data, json_path, ensure_ascii=False, indent=4)
+
+    if model in results and int(problem_name) in results[model]:
+        results[model][int(problem_name)]["judgment"] = data["judgment"]
+        results[model][int(problem_name)]["correct"] = data.get("correct", results[model][int(problem_name)].get("correct"))
+        results[model][int(problem_name)]["manual_overwrite"] = data.get(
+            "manual_overwrite", results[model][int(problem_name)].get("manual_overwrite")
+        )
+        results[model][int(problem_name)]["pass_at_1"] = data.get("pass_at_1", results[model][int(problem_name)].get("pass_at_1"))
+        results[model][int(problem_name)].pop("judgment_original", None)
+        results[model][int(problem_name)].pop("judgment_manual_overwrite", None)
+
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        saved_entry = judgment_rows[judge_pos][run_idx]
+        return jsonify(
+            {
+                "ok": True,
+                "points": _format_score_value(saved_entry.get("points")),
+                "max_points": _format_score_value(saved_entry.get("max_points")),
+                "desc": _judgment_entry_to_text(saved_entry),
+                "manual_overwrite": "original_judgment" in saved_entry,
+            }
+        )
 
     return redirect(url_for("problem_view", model=model, problem_name=problem_name))
 

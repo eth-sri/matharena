@@ -1,5 +1,5 @@
-uv run python arxivbench/create_queries.py --model-config openai/gpt-52-medium
-uv run python arxivbench/verify_queries.py --model-config openai/gpt-52-medium
-uv run python arxivbench/fulltext_review.py --model-config openai/gpt-52-medium
-uv run python arxivbench/fulltext_review.py --model-config openai/gpt-52-medium --key prior_work_filter --prompt arxivbench/prompts/prompt_prior_work_filter.md
-uv run python arxivbench/fulltext_review.py --model-config openai/gpt-52-medium --key solid_authors --prompt arxivbench/prompts/prompt_solid_authors.md --enable-web-search
+uv run python arxivmath/create_queries.py --model-config gemini/gemini-31-pro-medium
+uv run python arxivmath/verify_queries.py --model-config gemini/gemini-31-pro-medium
+uv run python arxivmath/fulltext_review.py --model-config gemini/gemini-31-pro-medium
+uv run python arxivmath/fulltext_review.py --model-config gemini/gemini-31-pro-medium --key prior_work_filter --prompt arxivmath/prompts/prompt_prior_work_filter.md
+uv run python arxivmath/fulltext_review.py --model-config gemini/gemini-31-pro-medium --key solid_authors --prompt arxivmath/prompts/prompt_solid_authors.md --enable-web-search --skip-ocr

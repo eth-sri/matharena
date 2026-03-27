@@ -1,0 +1,58 @@
+model_config: gemini/gemini-31-pro
+api_client_remove_keys:
+  - human_readable_id
+  - other_params
+  - date
+  - custom_instructions
+  - type
+  - scaffold_config
+enabled_tools: []
+max_tool_calls: 0
+
+prompt: |
+  You are an experienced Olympiad grader.
+  *Treat the official solution as fully correct and authoritative; do not claim it contains errors.*
+  Your task is to write a complete, grader-friendly rubric for the problem and official solution below. The rubric must map a student's proof to an integer score from **0 to 7**.
+  The official solution may occasionally skip or skim too quickly over particular steps. Make sure you have understood properly what goes on under the hood to determine the difficulty of a given step and how many points it should be awarded.
+
+  ---
+
+  ### INSTRUCTIONS
+
+  Produce the marking scheme in **exactly** the following three sections.
+  Do not deviate from this format, and do not give any further remarks or comments (i.e., do **not** even start with "here is the marking scheme for this problem").
+  Be concise and to-the-point, do not give details that limit the graders. The graders are capable, you do not have to specify every detail.
+
+  1. **Checkpoints (7 pts total)**
+    * Break the solution into logically independent checkpoints with **integer** point values.
+    * Allocate **>= 4 pts** to the main idea/critical steps (all combined); **<= 3 pts** to routine work (all combined).
+    * If a specific checkpoint can be achieved in multiple mathematically equivalent ways, mention this. However, only do so when the official solution mentions that the alternative is also acceptable.
+    * **Parallel solution paths (non-additive):**
+      * In rare occasions, the official solution admits more than one legitimate approach. If so, write **parallel checkpoint chains** labeled "Chain A: [idea] / Chain B: [idea] / ...". ONLY do so when the official solution allows for multiple paths. DO NOT add your own solution.
+      * When there are parallel solution paths, start this section with a bold rule: **Score exactly one chain: take the **maximum** subtotal among chains; do **not** add points across chains.**
+      * Within a chain, checkpoints may be additive.
+    * Finish with a one-line **"Total (max 7)"** check that is consistent with the non-additivity rule.
+    * Never demand cosmetic labels or specific variable names unless essential to the logic.
+  2. **Zero-credit items**
+    * List common arguments or observations that **earn 0 points** (e.g., conjectures without proof, especially in geometry, routine restatements of the problem, or dead-ends).
+    * Avoid redundancy with deductions below.
+  3. **Deductions**
+    * Bullet each typical/expected mistake with a **flat** penalty (**1**, **2**, or **"cap at x/7"**). Use caps for major problems, while subtraction should be used for smaller arithmetic errors. Try to anticipate likely errors based on the official solution structure.
+    * Target logic gaps, invalid claims, circular reasoning, or contradictions. Cosmetic slips (notation, arithmetic, wording) do **not** trigger deductions unless they break validity.
+    * If proofs contain **contradictory claims**, apply an appropriate deduction (e.g., **cap at 5/7**).
+    * If a proof is **incomplete but logically sound** (e.g., leaves cases unaddressed, or proves a key lemma but not the full result), do **not** deduct points; award partial credit based on checkpoints achieved.
+
+  ### IMPORTANT REQUIREMENTS
+
+  * Be concise, do **not** include details.
+  * **Arithmetic sanity checks:** it must be impossible to exceed **7** overall and at least one chain must allow a perfect **7/7**.
+  * Do **not** introduce, "fix," or critique the official solution.
+  * Avoid over-fragmenting: do not split routine algebra into 3+ separate 1-pt bullets.
+  * Keep notation consistent with the official solution; define any new symbols you introduce.
+  * Make sure your grading scheme can be understood separately from the solution. Notation only present in the solution (and not in the question) either needs to be clear from context or redefined.
+  * Do **not** include alternative pipelines based on angle chasing or bashing unless the official solution explicitly includes them.
+
+  ### PROBLEM
+  {problem}
+  ### OFFICIAL SOLUTION
+  {solution}

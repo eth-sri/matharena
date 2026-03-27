@@ -1,0 +1,18 @@
+model: "lm-provers/QED-Nano"
+api: custom
+api_key_env: null
+base_url: http://localhost:8000/v1
+max_tokens: 120000
+read_cost: 0.0
+write_cost: 0.0
+concurrent_requests: 32
+human_readable_id: QED-Nano
+date: "2026-02-15"
+temperature: 0.6
+top_p: 0.95
+other_params:
+  open: true
+  creator: LM-Provers
+  parameters: 4
+  active_parameters: 4
+  huggingface_id: lm-provers/QED-Nano

@@ -124,7 +124,7 @@ def main():
     )
     parser.add_argument("--from", dest="from_date", required=True, help="Start date YYYY-MM-DD")
     parser.add_argument("--until", dest="until_date", required=True, help="End date YYYY-MM-DD")
-    parser.add_argument("--outdir", default="arxivbench/paper", help="Output root directory")
+    parser.add_argument("--outdir", default="arxivmath/paper", help="Output root directory")
     parser.add_argument("--sleep", type=float, default=0.1, help="Seconds to sleep between records")
     parser.add_argument("--skip-existing", action="store_true", help="Skip papers already downloaded")
     args = parser.parse_args()

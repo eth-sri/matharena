@@ -193,8 +193,7 @@ h1, h2, h3, h4, h5, h6, summary, p {
   border: 1px solid #e0e0e0;
   /* Default subtle border */
   line-height: 1.6;
-  white-space: pre-wrap;
-  /* Preserve whitespace and wrap text */
+  white-space: normal;
 }
 
 .box.metadata-box {
@@ -256,14 +255,58 @@ h1, h2, h3, h4, h5, h6, summary, p {
 
 .description-box,
 .judgment-box {
-  background-color: #f9f9f9;
-  /* Kept light grey */
-  border-top: 4px solid #cccccc;
+  background-color: #fff6e8;
+  border-top: 4px solid #ffc993;
   color: #333333;
   white-space: normal;
 }
 
-.judgment-content {
+.judgment-content,
+.marked {
+  white-space: normal;
+}
+
+.marked p,
+.marked ul,
+.marked ol,
+.marked pre,
+.marked blockquote {
+  margin-top: 0.15rem;
+  margin-bottom: 0.15rem;
+}
+
+.marked p:first-child,
+.marked ul:first-child,
+.marked ol:first-child,
+.marked pre:first-child,
+.marked blockquote:first-child {
+  margin-top: 0;
+}
+
+.marked p:last-child,
+.marked ul:last-child,
+.marked ol:last-child,
+.marked pre:last-child,
+.marked blockquote:last-child {
+  margin-bottom: 0;
+}
+
+.marked ul,
+.marked ol {
+  padding-left: 1.4rem;
+}
+
+.marked li > p {
+  margin: 0;
+}
+
+.marked br {
+  line-height: 1.2;
+}
+
+.marked pre,
+.marked pre code,
+.marked code {
   white-space: pre-wrap;
 }
 
@@ -275,6 +318,12 @@ h1, h2, h3, h4, h5, h6, summary, p {
   color: #5a3e2b;
   font-weight: normal;
   color: #000000
+}
+
+.response-box.assistant {
+  background-color: #fff9f1;
+  border-top: 4px solid #e8c08f;
+  color: #3f3122;
 }
 
 .cot-box {
@@ -293,6 +342,13 @@ h1, h2, h3, h4, h5, h6, summary, p {
 
 .assistant {
   background-color: #ffe4c8;
+}
+
+.judge-output-box {
+  background-color: #f4f8ff;
+  border-top: 4px solid #9bb6e6;
+  border-color: #d8e3f4;
+  color: #243447;
 }
 
 .correct {

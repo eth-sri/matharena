@@ -5,6 +5,7 @@ import yaml
 import json
 from loguru import logger
 import sys
+from matharena.json_zst import OUTPUT_JSON_SUFFIX, load_json_zst
 # only log errors
 logger.remove()
 logger.add(sys.stderr, level="ERROR")
@@ -27,11 +28,10 @@ if __name__ == "__main__":
         if not competition_config.get("final_answer", True):
             continue
         
-        path_to_json_files = os.path.join(args.output_folder, comp, "**/*.json")
+        path_to_json_files = os.path.join(args.output_folder, comp, f"**/*{OUTPUT_JSON_SUFFIX}")
         json_files = glob.glob(path_to_json_files, recursive=True)
         for json_file in json_files:
-            with open(json_file, "r") as f:
-                data = json.load(f)
+            data = load_json_zst(json_file)
             gold_answer = data["gold_answer"]
             list_answer = "," in str(gold_answer)
             try:

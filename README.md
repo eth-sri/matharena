@@ -38,10 +38,6 @@ MathArena (NeurIPS D&B '25) is a platform for evaluation of LLMs on latest math 
     - [Verifying Problem Statements](#verifying-problem-statements)
     - [Upload to HuggingFace](#upload-to-huggingface)
   - [Competitions Requiring Grading](#competitions-requiring-grading)
-- [Scripts](#-scripts)
-  - [Creating a Leaderboard](#creating-a-leaderboard)
-  - [Curation](#curation)
-  - [Extraction](#extraction)
 - [Citation](#-citation)
 
 ---
@@ -123,20 +119,7 @@ There are several ways to track progress and debug runs:
   * ⚠️: The correct answer might be present in the model answer, but it was not extracted.
   * ❕: Model likely hit max token limit.
 
-If issues are found, delete all runs for that problem by deleting the corresponding output file or use `runs.py:drop_runs` for selective removal. After that, call `run.py again` or only repeat the grading using `scripts/regrade.py` as described above. If the parser requires a manual overwrite, you can edit `src/matharena/parse_manual.py` and add a key-value pair mapping the model solution to a parsable solution.
-
-### Adding Runs to the Website
-
-To postprocess results to add them to our website, you should run
-```bash
-bash scripts/website/postprocess.sh path/to/competition
-```
-
-You can test this by running a local instance of the MathArena website via
-```
-cd website
-uv run python3 flaskr/app.py
-```
+If issues are found, delete all runs for that problem by deleting the corresponding output file or use `runs.py:drop_runs` for selective removal. After that, call `run.py` again or only repeat the grading using `scripts/regrade.py` as described above. If the parser requires a manual overwrite, you can do so in the app by clicking on the run, which will show the model answer and allow you to overwrite the correctness of the parsed final answer.
 
 ### Uploading Answers to HuggingFace
 You can upload the model answers to HuggingFace as follows:
@@ -177,7 +160,6 @@ To add a new model add a config file in the `configs/models` folder. Each config
   - `cache_read_cost`: Cost per million cached input tokens in USD (default: same as `read_cost`).
   - `date`: Release date of the model in the format "yyyy-mm-dd".
   - `batch_processing`: If set to true, the model will be queried using batch processing. Only available for OpenAI and Anthropic models.
-  - `enable_anthropic_prompt_caching`: Enable Anthropic prompt-caching markers (`cache_control`) for Anthropic Messages API calls (default: true).
   - `use_openai_responses_api`: If set to true, will use the OpenAI responses API (instead of chat completions).
   - Other model/provider specific parameters (`config`, `provider`, `reasoning`, etc.).
 
@@ -244,60 +226,17 @@ uv run python scripts/curation/upload_competition.py --org your_org --repo-name 
 This will upload all answers in the appropriate format to a private repository named `your_org/your_repo_name`. `path/to/competition` is the relative path from the `configs/competition` folder to the competition folder (excluding the `.yaml` extension). Thus, you need to have created the configuration file before uploading to HuggingFace.
 
 ### Competitions Requiring Grading
-For competitions requiring human grading, we use the Open Proof Corpus repository: https://github.com/insait-institute/open-proof-corpus. This repository contains instructions to run models on questions and competitions and contains a nice grading interface for judges. It also contains a script that converts that format to the MathArena format. The result of this script should simply be copy-pasted to `outputs/path/to/competition` for use and display in this repository.
-
----
-## 📜 Scripts
-`scripts` contains various utility files that serve purposes from curation and verification of model outputs to extracting the raw data into latex tables. We briefly describe the purpose of the files that have not been explained yet here.
-
-### Creating a Leaderboard
-If you prefer to see a leaderboard with rigorous confidence intervals, you can run
+Competitions requiring grading by LLM judges, can be configured as follows:
+1. First, ensure you have added a `grading_scheme.json` file as described in [Setting Up Competition Files](#setting-up-competition-files). You can also automatically generate grading schemes if you have access to ground-truth solutions. These should be added as a list under the "ground_truth_solutions" key in the competition config file. Additionally, you should add a grading scheme creator config to the competition. See `configs/competitions/usamo/usamo_2026.yaml` for an example. Then, you can run:
 ```bash
-uv run python scripts/extraction/leaderboard.py --comps path/to/competition1 path/to/competition2
+uv run python scripts/judge/grading_scheme_creator.py --comp path/to/competition
 ```
-This script has several additional important parameters:
-- `--keep-comps` (bool): In addition to the average across the listed competitions, whether to also keep the results for each competition separately in the leaderboard.
-- `--compute-variance` (bool): Whether to compute the confidence intervals. Note: computing confidence intervals is expensive and can take several minutes.
-- `--alpha` (Default: 0.05): Significance level associated with the confidence intervals.
-- `--human-quantiles` (list[float]): Which quantiles of human performance to add to the leaderboard. Is only possible for AIME, SMT, and HMMT 2025.
-
-### Curation
-
-After making a change to the parser, and before rerunning models, you can test your updates using:
+2. After the grading scheme is created, you can run the evaluation as described in [Running an Eval](#running-an-eval). Judgment can be performed by adding a judge config to the competition config file. See `configs/competitions/usamo/usamo_2026.yaml` for an example. Run the judges as follows:
 ```bash
-uv run python scripts/curation/test_parser_changes.py
+uv run python scripts/judge/judge.py --comp path/to/competition
 ```
-This script will automatically extract every possible model output in the `outputs` folder and verify that the stored results match the new parser's output. The script will list all outputs that do not satisfy this, essentially serving as a rigorous test for the new parser.
-
-To verify with a judge model whether the rule-based parser returns the correct answers, one can run 
-```bash
-uv run python scripts/curation/judge_parser.py --comp aime/aime_2025
-```
-This will verify and check all decisions by the rule-based parser using Gemini-Flash-2.5. Outputs where the model disagrees with the parser are logged in `logs/parser_judge`.
-
-### Extraction
-This folder contains scripts that extract the answers from the raw data and creates plots and a leaderboard.
-
-To compare model performance between several competitions in a plot, one can run
-```bash
-uv run python scripts/extraction/comparison.py --old-comps aime/aime_2024 hmmt/hmmt_feb_2024 --new-comps aime/aime_2025 hmmt/hmmt_feb_2025
-```
-
-To compare the spearman correlation between different competitions, run
-```bash
-uv run python scripts/extraction/rank_correlation.py --comps aime/aime_2025  hmmt/hmmt_feb_2025
-```
-
-To create a plot of the Pareto-Frontier of model performance vs cost or model release date, run
-```bash
-uv run python scripts/extraction/timeline.py --comps aime/aime_2025  hmmt/hmmt_feb_2025
-```
-Here, specify the `--cost` parameter if you prefer the Pareto-Frontier for cost.
-
-To create a table containing results per category (Combinatorics, Number Theory, ...), run
-```bash
-uv run python scripts/extraction/type_scoring.py --comps aime/aime_2025  hmmt/hmmt_feb_2025
-```
+There are various agents available for judging, you can see example configs for a couple agents in `configs/judges/`. If you want to add a new agent, you can follow the examples.
+3. If you want, you can manually overwrite the judgments by using the app described in [Tracking Progress and Debugging Runs](#tracking-progress-and-debugging-runs) to inspect the model answers and manually change the total grade given.
 
 ---
 ## 📚 Citation

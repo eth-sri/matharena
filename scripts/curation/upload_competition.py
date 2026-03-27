@@ -45,7 +45,10 @@ if __name__ == "__main__":
             ids = list(answers["id"])
         else:
             answers = json.load(open(os.path.join(folder, "grading_scheme.json"), "r"))
-            ids = [grading["id"] for grading in answers]
+            answers = pd.DataFrame(answers)
+            answers["id"] = answers["id"].astype(int)
+            ids = list(answers["id"])
+            
         
         if os.path.exists(os.path.join(folder, "source.csv")):
             source = pd.read_csv(os.path.join(folder, "source.csv"))
@@ -65,13 +68,14 @@ if __name__ == "__main__":
                 if "source" in answers.columns:
                     data_dict["source"] = answers.iloc[i]["source"]
             else:
-                data_dict["points"] = answers[i]["points"]
-                data_dict["grading_scheme"] = answers[i]["scheme"]
+                data_dict["points"] = answers.iloc[i]["points"]
+                data_dict["grading_scheme"] = answers.iloc[i]["scheme"]
                 sample_solution_file = os.path.join(folder, "solutions", f"{idx}.tex")
+                sample_grading_file = os.path.join(folder, "sample_grading", f"{idx}.txt")
 
                 if os.path.exists(sample_solution_file):
                     data_dict["sample_solution"] = open(sample_solution_file, "r").read()
-                    sample_grading_file = os.path.join(folder, "sample_grading", f"{idx}.txt")
+                if os.path.exists(sample_grading_file):
                     data_dict["sample_grading"] = open(sample_grading_file, "r").read()
             
             if not args.visual_dataset:
@@ -126,7 +130,6 @@ if __name__ == "__main__":
         )
         # remove temp folder
         shutil.rmtree("temp")
-
 
 
 

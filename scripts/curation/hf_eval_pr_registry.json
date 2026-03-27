@@ -1,5 +1,101 @@
 {
   "entries": {
+    "Qwen/Qwen3-30B-A3B-Thinking-2507::aime/aime_2026::.eval_results/MathArena--aime_2026.yaml": {
+      "commit_url": "https://huggingface.co/Qwen/Qwen3-30B-A3B-Thinking-2507/commit/ebba3ef8bebbbd7e247d636da599493cbf9d203b",
+      "competition_huggingface_id": "MathArena/aime_2026",
+      "competition_name": "aime/aime_2026",
+      "created_at": "2026-03-17T09:58:09.552788+00:00",
+      "date": "2026-03-17",
+      "eval_result_path": ".eval_results/MathArena--aime_2026.yaml",
+      "model_config_path": "qwen/qwen3_30b_a3b_2507",
+      "model_huggingface_id": "Qwen/Qwen3-30B-A3B-Thinking-2507",
+      "pr_url": "https://huggingface.co/Qwen/Qwen3-30B-A3B-Thinking-2507/discussions/12",
+      "score": 87.5
+    },
+    "Qwen/Qwen3-30B-A3B-Thinking-2507::hmmt/hmmt_feb_2026::.eval_results/MathArena--hmmt_feb_2026.yaml": {
+      "commit_url": "https://huggingface.co/Qwen/Qwen3-30B-A3B-Thinking-2507/commit/6d0a57be9d27cb9c81d797ee30a04bbd21ea3e6c",
+      "competition_huggingface_id": "MathArena/hmmt_feb_2026",
+      "competition_name": "hmmt/hmmt_feb_2026",
+      "created_at": "2026-03-17T09:58:28.245738+00:00",
+      "date": "2026-03-17",
+      "eval_result_path": ".eval_results/MathArena--hmmt_feb_2026.yaml",
+      "model_config_path": "qwen/qwen3_30b_a3b_2507",
+      "model_huggingface_id": "Qwen/Qwen3-30B-A3B-Thinking-2507",
+      "pr_url": "https://huggingface.co/Qwen/Qwen3-30B-A3B-Thinking-2507/discussions/13",
+      "score": 78.79
+    },
+    "Qwen/Qwen3-4B-Thinking-2507::aime/aime_2026::.eval_results/MathArena--aime_2026.yaml": {
+      "commit_url": "https://huggingface.co/Qwen/Qwen3-4B-Thinking-2507/commit/8219221c41f53df2d5d455c0286fcdd3f472066f",
+      "competition_huggingface_id": "MathArena/aime_2026",
+      "competition_name": "aime/aime_2026",
+      "created_at": "2026-03-17T09:58:11.702710+00:00",
+      "date": "2026-03-17",
+      "eval_result_path": ".eval_results/MathArena--aime_2026.yaml",
+      "model_config_path": "qwen/qwen3_4b_2507",
+      "model_huggingface_id": "Qwen/Qwen3-4B-Thinking-2507",
+      "pr_url": "https://huggingface.co/Qwen/Qwen3-4B-Thinking-2507/discussions/16",
+      "score": 82.5
+    },
+    "Qwen/Qwen3-4B-Thinking-2507::hmmt/hmmt_feb_2026::.eval_results/MathArena--hmmt_feb_2026.yaml": {
+      "commit_url": "https://huggingface.co/Qwen/Qwen3-4B-Thinking-2507/commit/37209f91a17398d6bdbafa9eb25903102bb4b38c",
+      "competition_huggingface_id": "MathArena/hmmt_feb_2026",
+      "competition_name": "hmmt/hmmt_feb_2026",
+      "created_at": "2026-03-17T09:58:30.435969+00:00",
+      "date": "2026-03-17",
+      "eval_result_path": ".eval_results/MathArena--hmmt_feb_2026.yaml",
+      "model_config_path": "qwen/qwen3_4b_2507",
+      "model_huggingface_id": "Qwen/Qwen3-4B-Thinking-2507",
+      "pr_url": "https://huggingface.co/Qwen/Qwen3-4B-Thinking-2507/discussions/17",
+      "score": 53.03
+    },
+    "Qwen/Qwen3.5-27B::aime/aime_2026::.eval_results/MathArena--aime_2026.yaml": {
+      "commit_url": "https://huggingface.co/Qwen/Qwen3.5-27B/commit/5c79df4983294e224c9594f0591bd41c51afa23e",
+      "competition_huggingface_id": "MathArena/aime_2026",
+      "competition_name": "aime/aime_2026",
+      "created_at": "2026-03-17T09:58:13.942492+00:00",
+      "date": "2026-03-17",
+      "eval_result_path": ".eval_results/MathArena--aime_2026.yaml",
+      "model_config_path": "qwen/qwen3.5_27b",
+      "model_huggingface_id": "Qwen/Qwen3.5-27B",
+      "pr_url": "https://huggingface.co/Qwen/Qwen3.5-27B/discussions/34",
+      "score": 90.83
+    },
+    "Qwen/Qwen3.5-27B::hmmt/hmmt_feb_2026::.eval_results/MathArena--hmmt_feb_2026.yaml": {
+      "commit_url": "https://huggingface.co/Qwen/Qwen3.5-27B/commit/3494fae8f489c7835561020fc5909a0b78853172",
+      "competition_huggingface_id": "MathArena/hmmt_feb_2026",
+      "competition_name": "hmmt/hmmt_feb_2026",
+      "created_at": "2026-03-17T09:58:32.549580+00:00",
+      "date": "2026-03-17",
+      "eval_result_path": ".eval_results/MathArena--hmmt_feb_2026.yaml",
+      "model_config_path": "qwen/qwen3.5_27b",
+      "model_huggingface_id": "Qwen/Qwen3.5-27B",
+      "pr_url": "https://huggingface.co/Qwen/Qwen3.5-27B/discussions/35",
+      "score": 81.06
+    },
+    "Qwen/Qwen3.5-35B-A3B::aime/aime_2026::.eval_results/MathArena--aime_2026.yaml": {
+      "commit_url": "https://huggingface.co/Qwen/Qwen3.5-35B-A3B/commit/8e160c7356b752979274cb1fd173f9bbd030c274",
+      "competition_huggingface_id": "MathArena/aime_2026",
+      "competition_name": "aime/aime_2026",
+      "created_at": "2026-03-17T09:58:16.663997+00:00",
+      "date": "2026-03-17",
+      "eval_result_path": ".eval_results/MathArena--aime_2026.yaml",
+      "model_config_path": "qwen/qwen3.5_35b_a3b",
+      "model_huggingface_id": "Qwen/Qwen3.5-35B-A3B",
+      "pr_url": "https://huggingface.co/Qwen/Qwen3.5-35B-A3B/discussions/57",
+      "score": 93.33
+    },
+    "Qwen/Qwen3.5-35B-A3B::hmmt/hmmt_feb_2026::.eval_results/MathArena--hmmt_feb_2026.yaml": {
+      "commit_url": "https://huggingface.co/Qwen/Qwen3.5-35B-A3B/commit/ca8862df710fafb0e44809459c7e74af2b4ded72",
+      "competition_huggingface_id": "MathArena/hmmt_feb_2026",
+      "competition_name": "hmmt/hmmt_feb_2026",
+      "created_at": "2026-03-17T09:58:34.750627+00:00",
+      "date": "2026-03-17",
+      "eval_result_path": ".eval_results/MathArena--hmmt_feb_2026.yaml",
+      "model_config_path": "qwen/qwen3.5_35b_a3b",
+      "model_huggingface_id": "Qwen/Qwen3.5-35B-A3B",
+      "pr_url": "https://huggingface.co/Qwen/Qwen3.5-35B-A3B/discussions/58",
+      "score": 81.82
+    },
     "Qwen/Qwen3.5-397B-A17B::aime/aime_2026::.eval_results/MathArena--aime_2026.yaml": {
       "commit_url": "https://huggingface.co/Qwen/Qwen3.5-397B-A17B/commit/aa452f4b8bc9d667981dd47a0ef1c9feed14abb7",
       "competition_huggingface_id": "MathArena/aime_2026",
@@ -23,6 +119,30 @@
       "model_huggingface_id": "Qwen/Qwen3.5-397B-A17B",
       "pr_url": "https://huggingface.co/Qwen/Qwen3.5-397B-A17B/discussions/53",
       "score": 87.88
+    },
+    "Qwen/Qwen3.5-9B::aime/aime_2026::.eval_results/MathArena--aime_2026.yaml": {
+      "commit_url": "https://huggingface.co/Qwen/Qwen3.5-9B/commit/030a14dfda27146c6baf2fc8c5ac5e12039b4e25",
+      "competition_huggingface_id": "MathArena/aime_2026",
+      "competition_name": "aime/aime_2026",
+      "created_at": "2026-03-17T09:58:18.923386+00:00",
+      "date": "2026-03-17",
+      "eval_result_path": ".eval_results/MathArena--aime_2026.yaml",
+      "model_config_path": "qwen/qwen3.5_9b",
+      "model_huggingface_id": "Qwen/Qwen3.5-9B",
+      "pr_url": "https://huggingface.co/Qwen/Qwen3.5-9B/discussions/35",
+      "score": 92.5
+    },
+    "Qwen/Qwen3.5-9B::hmmt/hmmt_feb_2026::.eval_results/MathArena--hmmt_feb_2026.yaml": {
+      "commit_url": "https://huggingface.co/Qwen/Qwen3.5-9B/commit/27e51681d8ab505859ccd61d543874833b7e2968",
+      "competition_huggingface_id": "MathArena/hmmt_feb_2026",
+      "competition_name": "hmmt/hmmt_feb_2026",
+      "created_at": "2026-03-17T09:58:36.795177+00:00",
+      "date": "2026-03-17",
+      "eval_result_path": ".eval_results/MathArena--hmmt_feb_2026.yaml",
+      "model_config_path": "qwen/qwen3.5_9b",
+      "model_huggingface_id": "Qwen/Qwen3.5-9B",
+      "pr_url": "https://huggingface.co/Qwen/Qwen3.5-9B/discussions/36",
+      "score": 71.21
     },
     "deepseek-ai/DeepSeek-V3.2::aime/aime_2026::.eval_results/MathArena--aime_2026.yaml": {
       "commit_url": "https://huggingface.co/deepseek-ai/DeepSeek-V3.2/commit/19add1a247f917e3f1d35fa4d2aeb4bfd332bc6d",
@@ -48,6 +168,30 @@
       "pr_url": "https://huggingface.co/deepseek-ai/DeepSeek-V3.2/discussions/46",
       "score": 84.09
     },
+    "lm-provers/QED-Nano::aime/aime_2026::.eval_results/MathArena--aime_2026.yaml": {
+      "commit_url": "https://huggingface.co/lm-provers/QED-Nano/commit/40c527b455e9f25eb00e6e636ffe75a4cd0b74d8",
+      "competition_huggingface_id": "MathArena/aime_2026",
+      "competition_name": "aime/aime_2026",
+      "created_at": "2026-03-17T09:58:04.816773+00:00",
+      "date": "2026-03-17",
+      "eval_result_path": ".eval_results/MathArena--aime_2026.yaml",
+      "model_config_path": "other/qed-nano",
+      "model_huggingface_id": "lm-provers/QED-Nano",
+      "pr_url": "https://huggingface.co/lm-provers/QED-Nano/discussions/3",
+      "score": 82.5
+    },
+    "lm-provers/QED-Nano::hmmt/hmmt_feb_2026::.eval_results/MathArena--hmmt_feb_2026.yaml": {
+      "commit_url": "https://huggingface.co/lm-provers/QED-Nano/commit/7dcd320a804f5782e47a528820611691f4bece5f",
+      "competition_huggingface_id": "MathArena/hmmt_feb_2026",
+      "competition_name": "hmmt/hmmt_feb_2026",
+      "created_at": "2026-03-17T09:58:24.891413+00:00",
+      "date": "2026-03-17",
+      "eval_result_path": ".eval_results/MathArena--hmmt_feb_2026.yaml",
+      "model_config_path": "other/qed-nano",
+      "model_huggingface_id": "lm-provers/QED-Nano",
+      "pr_url": "https://huggingface.co/lm-provers/QED-Nano/discussions/4",
+      "score": 62.88
+    },
     "moonshotai/Kimi-K2.5::aime/aime_2026::.eval_results/MathArena--aime_2026.yaml": {
       "commit_url": "https://huggingface.co/moonshotai/Kimi-K2.5/commit/d725679df7d86fb5e52bbc462c6995a0a054f9e7",
       "competition_huggingface_id": "MathArena/aime_2026",
@@ -71,6 +215,30 @@
       "model_huggingface_id": "moonshotai/Kimi-K2.5",
       "pr_url": "https://huggingface.co/moonshotai/Kimi-K2.5/discussions/95",
       "score": 87.12
+    },
+    "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16::aime/aime_2026::.eval_results/MathArena--aime_2026.yaml": {
+      "commit_url": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16/commit/be0ac34220c8e3043f7bbf90f3ef9a3ae7b13b06",
+      "competition_huggingface_id": "MathArena/aime_2026",
+      "competition_name": "aime/aime_2026",
+      "created_at": "2026-03-17T09:58:02.847335+00:00",
+      "date": "2026-03-17",
+      "eval_result_path": ".eval_results/MathArena--aime_2026.yaml",
+      "model_config_path": "nvidia/nemotron-3-super",
+      "model_huggingface_id": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16",
+      "pr_url": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16/discussions/19",
+      "score": 90.0
+    },
+    "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16::hmmt/hmmt_feb_2026::.eval_results/MathArena--hmmt_feb_2026.yaml": {
+      "commit_url": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16/commit/b72770c88213f1b8c568bcbb69571b06fee2533d",
+      "competition_huggingface_id": "MathArena/hmmt_feb_2026",
+      "competition_name": "hmmt/hmmt_feb_2026",
+      "created_at": "2026-03-17T09:58:22.979525+00:00",
+      "date": "2026-03-17",
+      "eval_result_path": ".eval_results/MathArena--hmmt_feb_2026.yaml",
+      "model_config_path": "nvidia/nemotron-3-super",
+      "model_huggingface_id": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16",
+      "pr_url": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16/discussions/20",
+      "score": 84.85
     },
     "stepfun-ai/Step-3.5-Flash::aime/aime_2026::.eval_results/MathArena--aime_2026.yaml": {
       "commit_url": "https://huggingface.co/stepfun-ai/Step-3.5-Flash/commit/bf34d44788fe175c313a4cd8753172787a7410b2",
