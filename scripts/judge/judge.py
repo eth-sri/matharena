@@ -1,8 +1,10 @@
 import argparse
 import json
+import os
 from pathlib import Path
 
 import yaml
+from datasets import load_dataset
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -16,6 +18,28 @@ def load_original_statement(dataset_path, problem_idx):
     if not path.exists():
         return ""
     return path.read_text(encoding="utf-8")
+
+
+def load_grading_map(dataset_path):
+    grading_path = Path(dataset_path) / "grading_scheme.json"
+    if os.path.exists(dataset_path) and grading_path.exists():
+        with open(grading_path, "r", encoding="utf-8") as f:
+            return {int(row["id"]): row for row in json.load(f)}
+
+    rows = load_dataset(dataset_path, split="train").to_list()
+    grading_map = {}
+    for row in rows:
+        problem_idx = int(row["problem_idx"])
+        grading_map[problem_idx] = {
+            "id": problem_idx,
+            "points": row.get("points", 7),
+            "grading_scheme": row.get("grading_scheme"),
+            "sample_solution": row.get("sample_solution"),
+            "sample_grading": row.get("sample_grading"),
+            "ground_truth_proofs": row.get("ground_truth_proofs", []),
+            "ground_truth_solutions": row.get("ground_truth_solutions", []),
+        }
+    return grading_map
 
 
 def ensure_judgment_shape(run_data, slot):
@@ -119,8 +143,7 @@ def main():
 
     dataset_path = comp_cfg.get("dataset_path")
 
-    with open(Path(dataset_path) / "grading_scheme.json", "r", encoding="utf-8") as f:
-        grading_map = {int(row["id"]): row for row in json.load(f)}
+    grading_map = load_grading_map(dataset_path)
 
     output_root = Path(args.output_dir) / args.comp
 
