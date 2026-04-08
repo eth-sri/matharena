@@ -17,7 +17,6 @@ from matharena.runs import Runs
 from matharena.solvers import AgentPool, PureModelSolver
 from matharena.tools.code_execution import execute_code
 from matharena.tools.paper_search import read_paper, query_semantic_scholar, read_pages, find_in_paper
-from matharena.tools.take_a_break import take_a_break
 from matharena.utils import normalize_conversation, save_run_for_recovery
 
 
