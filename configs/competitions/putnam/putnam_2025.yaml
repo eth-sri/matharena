@@ -11,5 +11,5 @@ strict_parsing: false
 n_problems: 12
 date: "2025-12-07"
 final_answer: false
-dataset_path: data/putnam/putnam_2025
+dataset_path: MathArena/putnam_2025
 judge_config: judges/ablations/judge

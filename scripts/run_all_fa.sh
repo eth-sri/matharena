@@ -11,9 +11,11 @@ COMPS=(
   # "brumo/brumo_2025"
   # "cmimc/cmimc_2025"
   "apex/shortlist_2025"
-  "arxiv/december"
   "arxiv/january"
   "arxiv/february"
+  "arxiv/march"
+  "arxiv_false/february"
+  "arxiv_false/march"
   "apex/apex_2025"
 )
 
@@ -23,6 +25,7 @@ declare -A N_VALUES=(
   # add more overrides here if needed
   ["arxiv/december"]=4
   ["arxiv/january"]=4
+  ["arxiv_false/march"]=2
 )
 
 COMP_N_OVERRIDES=()

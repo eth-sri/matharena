@@ -51,7 +51,7 @@ class RequestLogger:
         with open(logfile, "w") as f:
             json.dump(data, f, indent=4)
 
-    def log_response(self, ts, batch_idx, response, **info):
+    def log_response(self, ts, batch_idx, response=None, **info):
         if self.comp_name is None:
             logfile = f"{self.log_dir}/uninitialized/{ts}_idx{batch_idx}.json"
         else:
@@ -69,7 +69,8 @@ class RequestLogger:
 
         # Update the data with the response information
         data["response_info"] = info
-        data["response"] = response
+        if response is not None:
+            data["response"] = response
         with open(logfile, "w") as f:
             json.dump(data, f, indent=4)
 

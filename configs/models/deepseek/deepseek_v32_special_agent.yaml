@@ -1,0 +1,4 @@
+type: agent
+model_config: models/deepseek/deepseek_v32_special
+scaffold_config: agent_scaffolds/deepseek_math
+human_readable_id: DeepSeek-v3.2-Speciale Agent

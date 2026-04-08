@@ -12,8 +12,8 @@ Respond **only** with a JSON object:
 }}
 ```
 
-If any criterion fails, output `"keep": false`.
-If all criteria pass, output `"keep": true`.
+If you could not confirm any author satisfies the criteria, output `"keep": false`.
+Otherwise, output `"keep": true`.
 
 ---
 

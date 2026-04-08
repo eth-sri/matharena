@@ -8,14 +8,16 @@ For removing problems:
    and source_metadata.csv (if it exists)
 3. Renumber remaining problems to maintain sequential IDs
 4. Remove corresponding .tex files from problems directory
-5. Remove corresponding .json files from outputs subdirectories
-6. Update idx fields in remaining JSON files
+5. Remove corresponding .tex files from original directory (if it exists)
+6. Remove corresponding .json files from outputs subdirectories
+7. Update idx fields in remaining JSON files
 
 For reordering problems:
 1. Take a permutation of problem IDs
 2. Reorder problems in answers.csv or grading_scheme.json, source.csv, and source_metadata.csv (if it exists)
 3. Rename .tex files in problems directory according to the new order
-4. Rename .json files in outputs subdirectories and update their idx field
+4. Rename .tex files in original directory according to the new order (if it exists)
+5. Rename .json files in outputs subdirectories and update their idx field
 """
 
 import argparse
@@ -542,6 +544,7 @@ def main():
     answers_csv = data_dir / "answers.csv"
     grading_scheme_json = data_dir / "grading_scheme.json"
     problems_dir = data_dir / "problems"
+    original_dir = data_dir / "original"
     outputs_dir = project_root / "outputs" / args.competition
 
     data_dir_to = None
@@ -550,6 +553,7 @@ def main():
     answers_csv_to = None
     grading_scheme_json_to = None
     problems_dir_to = None
+    original_dir_to = None
     outputs_dir_to = None
     if args.to_competition:
         data_dir_to = project_root / "data" / args.to_competition
@@ -558,6 +562,7 @@ def main():
         answers_csv_to = data_dir_to / "answers.csv"
         grading_scheme_json_to = data_dir_to / "grading_scheme.json"
         problems_dir_to = data_dir_to / "problems"
+        original_dir_to = data_dir_to / "original"
         outputs_dir_to = project_root / "outputs" / args.to_competition
     
     has_source_csv = source_csv.exists()
@@ -603,6 +608,7 @@ def main():
         print("Reordered dataset files.")
 
         reorder_problems_directory(str(problems_dir), permutation)
+        reorder_problems_directory(str(original_dir), permutation)
         reorder_json_outputs(str(outputs_dir), permutation)
 
         print(f"\nCompleted! Reordered {len(permutation)} problems.")
@@ -680,6 +686,20 @@ def main():
                                     n_to_problems)
         except Exception as e:
             print(f"Error updating problems directory: {e}")
+
+        n_to_original = 0
+        if original_dir_to:
+            n_to_original = len(list(Path(original_dir_to).glob("*.tex")))
+        try:
+            update_problems_directory(
+                str(original_dir),
+                ids_to_remove,
+                final_count,
+                str(original_dir_to) if original_dir_to else None,
+                n_to_original,
+            )
+        except Exception as e:
+            print(f"Error updating original directory: {e}")
         
         update_json_outputs(str(outputs_dir), ids_to_remove, 
                             str(outputs_dir_to) if outputs_dir_to else None,

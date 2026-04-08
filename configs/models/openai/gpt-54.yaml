@@ -12,6 +12,7 @@ batch_processing: false
 background: true
 use_openai_responses_api: true
 date: "2026-03-05"
+service_tier: "flex"
 reasoning:
   summary: "auto"
 other_params:

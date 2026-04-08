@@ -1,9 +1,9 @@
 instruction: |
   Try to generate a proof for the following statement:
 strict_parsing: false
-n_problems: 31
-date: "2026-02-01"
+n_problems: 56
+date: "2026-03-01"
 final_answer: false
-dataset_path: MathArena/brokenarxiv-0226
+dataset_path: MathArena/brokenarxiv-0326
 judge_configs:
   - judges/arxiv_judge

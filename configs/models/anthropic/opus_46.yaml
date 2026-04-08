@@ -15,7 +15,7 @@ output_config:
   effort: high
 cache_control:
   type: ephemeral
-batch_processing: false
+batch_processing: true
 human_readable_id: Claude-Opus-4.6 (High)
 date: "2026-02-05"
 other_params:

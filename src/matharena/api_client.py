@@ -1345,15 +1345,17 @@ class APIClient:
                             response = client.responses.retrieve(response.id)
                             if time.time() - time_start > self.timeout:
                                 raise TimeoutError("Timeout waiting for background response.")
+                        request_logger.log_response(ts=ts, batch_idx=idx, response=response.model_dump())
                         try:
                             response.usage.input_tokens
                         except:
                             raise ValueError("No usage info in response -> if in background, this mean exception occured.")
-                    request_logger.log_response(ts=ts, batch_idx=idx, response=response.model_dump())
+                    else:
+                        request_logger.log_response(ts=ts, batch_idx=idx, response=response.model_dump())
                 except Exception as e:
                     if "rate limit" not in str(e).lower() and "429" not in str(e):
                         total_retries += 1
-                    request_logger.log_response(ts=ts, batch_idx=idx, response={"exception": str(e)})
+                    request_logger.log_response(ts=ts, batch_idx=idx, exception={"exception": str(e)})
                     time.sleep(60)
                     logger.error(f"Got OpenAI error in responses api inner. Exception: {e}")
                     continue

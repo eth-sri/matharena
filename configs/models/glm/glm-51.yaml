@@ -1,17 +1,16 @@
-model: glm-5
+model: glm-5.1
 api: glm
 max_tokens: 131072
-concurrent_requests: 32
+concurrent_requests: 64
 temperature: 1
 top_p: 0.95
 read_cost: 1
 write_cost: 3.2
-human_readable_id: GLM 5
-date: "2026-02-11"
+human_readable_id: GLM 5.1
+date: "2026-04-05"
 other_params:
   open: true
   creator: Z.ai
   parameters: 744
   active_parameters: 40
-  huggingface_id: zai-org/GLM-5
-stream_openai_chat_completions: true
+  huggingface_id: zai-org/GLM-5.1

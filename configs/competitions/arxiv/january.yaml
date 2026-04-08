@@ -5,4 +5,4 @@ instruction: |
 strict_parsing: false
 n_problems: 23
 date: "2026-01-01"
-dataset_path: data/arxiv/january
+dataset_path: MathArena/arxivmath-0126

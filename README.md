@@ -15,30 +15,7 @@
 
 ## 👋 Overview
 
-MathArena (NeurIPS D&B '25) is a platform for evaluation of LLMs on latest math competitions and olympiads. It is hosted on [matharena.ai](https://matharena.ai/). This repository contains all code used for model evaluation. This README explains how to run your models or add a new competition. You can find logs from our evaluation containing full reasoning traces (if available) and solutions produced by the models on our HuggingFace page: [https://huggingface.co/MathArena](https://huggingface.co/MathArena).
-
-## 📑 Table of Contents
-- [Installation](#-installation)
-  - [Install UV](#install-uv)
-  - [Alternative installation](#alternative-installation)
-- [Running an Eval](#-running-an-eval)
-  - [What Does This Do?](#what-does-this-do)
-  - [Updating Runs](#updating-runs)
-  - [Tracking Progress and Debugging Runs](#tracking-progress-and-debugging-runs)
-  - [Adding Runs to the Website](#adding-runs-to-the-website)
-  - [Uploading Answers to HuggingFace](#uploading-answers-to-huggingface)
-  - [Project Euler](#project-euler)
-- [Adding a New Model/Agent](#-adding-a-new-modelagent)
-  - [Agents](#agents)
-- [Adding a Competition](#-adding-a-competition)
-  - [Competition Format](#competition-format)
-  - [Configuration](#configuration)
-  - [Manual Curation and Creation](#manual-curation-and-creation)
-    - [Setting Up Competition Files](#setting-up-competition-files)
-    - [Verifying Problem Statements](#verifying-problem-statements)
-    - [Upload to HuggingFace](#upload-to-huggingface)
-  - [Competitions Requiring Grading](#competitions-requiring-grading)
-- [Citation](#-citation)
+MathArena (NeurIPS D&B '25) is a platform for evaluation of LLMs on latest math competitions and olympiads. It is hosted on [matharena.ai](https://matharena.ai/). This repository contains all code used for model evaluation. This README explains how to run your models. For more details about other aspects of the project, such as adding new competitions, please refer to the specific README files in the `readmes/` folder. You can find logs from our evaluation containing full reasoning traces (if available) and solutions produced by the models on our HuggingFace page: [https://huggingface.co/MathArena](https://huggingface.co/MathArena).
 
 ---
 ## 🚀 Installation
@@ -76,6 +53,11 @@ uv run python scripts/run.py --comp path/to/competition --models path/to/model1
 - `path/to/competition`: Relative path from the `configs/competition` folder to the competition config file (excluding the `.yaml` extension).
 - `path/to/model1`: Relative path (or multiple) from the `configs/models` folder to the model config file (excluding the `.yaml` extension). See [Adding a Model/Agent](#adding-a-model) below for model config file structure.
 
+The scripts `run_all_fa.sh` and `run_all_kangaroo.sh` provide convenient shortcuts to run a model on all current non-deprecated competitions. They can be executed as follows:
+```bash
+bash scripts/run_all_fa.sh path/to/model
+```
+
 **Example:**
 ```bash
 uv run python scripts/run.py --comp aime/aime_2025 --models openai/gpt-4o 
@@ -86,51 +68,52 @@ uv run python scripts/run.py --comp aime/aime_2025 --models openai/gpt-4o
 - `--redo-all`: Ignore existing runs for this model and rerun everything (default: false, continues from existing runs found in `outputs/`).
 - `--problems`: One-based indices of problems to run (default: runs all problems).
 
-### What Does This Do?
+### Current Website Competitions
+The table below maps all non-deprecated competitions currently shown on the website to their competition config. `Requires judging` indicates whether the config requires a separate `scripts/judge/judge.py` pass.
 
-This instantiates a Runner (`runner.py`) which loads competition problems (from HuggingFace or locally) and instantiates a <b>Solver</b> corresponding to either a pure model (`solvers/pure_model_solver.py`) or an agent (`solvers/agent_pool.py`). See [Adding a Model/Agent](#adding-a-model) for more details on agents.
+| Website section | Website competition | Competition config | Requires judging |
+| --- | --- | --- | --- |
+| BrokenArxiv | 02/2026 | `arxiv_false/february.yaml` | Yes |
+| BrokenArxiv | 03/2026 | `arxiv_false/march.yaml` | Yes |
+| ArXivMath | 01/2026 | `arxiv/january.yaml` | No |
+| ArXivMath | 02/2026 | `arxiv/february.yaml` | No |
+| ArXivMath | 03/2026 | `arxiv/march.yaml` | No |
+| Visual Math | Kangaroo 2025 1-2 | `kangaroo/kangaroo_2025_1-2.yaml` | No |
+| Visual Math | Kangaroo 2025 3-4 | `kangaroo/kangaroo_2025_3-4.yaml` | No |
+| Visual Math | Kangaroo 2025 5-6 | `kangaroo/kangaroo_2025_5-6.yaml` | No |
+| Visual Math | Kangaroo 2025 7-8 | `kangaroo/kangaroo_2025_7-8.yaml` | No |
+| Visual Math | Kangaroo 2025 9-10 | `kangaroo/kangaroo_2025_9-10.yaml` | No |
+| Visual Math | Kangaroo 2025 11-12 | `kangaroo/kangaroo_2025_11-12.yaml` | No |
+| Final-Answer Comps | AIME 2026 | `aime/aime_2026.yaml` | No |
+| Final-Answer Comps | HMMT Feb 2026 | `hmmt/hmmt_feb_2026.yaml` | No |
+| Final-Answer Comps | Apex | `apex/apex_2025.yaml` | No |
+| Final-Answer Comps | Apex Shortlist | `apex/shortlist_2025.yaml` | No |
+| Proof-Based Comps | USAMO 2025 | `usamo/usamo_2025.yaml` | Yes |
+| Proof-Based Comps | IMO 2025 | `imo/imo_2025.yaml` | Yes |
+| Proof-Based Comps | IMC 2025 | `imc/imc_2025.yaml` | Yes |
+| Proof-Based Comps | Miklos Schweitzer 2025 | `miklos/2025.yaml` | Yes |
+| Proof-Based Comps | Putnam 2025 | `putnam/putnam_2025.yaml` | Yes |
+| Proof-Based Comps | USAMO 2026 | `usamo/usamo_2026.yaml` | Yes |
+| Project Euler | Project Euler | `euler/euler.yaml` | No |
 
-The runner prompts the LLM API (`api_client.py`) to solve each problem `n` times. Each run is then parsed (`parser.py`) and graded against the gold solution (`grader.py`). Finally, all data from runs (`runs.py`) is normalized into a common API-independent format and saved under `outputs/`.
+Note: Since we do not publish the correct answers for Project Euler problems, they cannot be directly judged as correct or incorrect without adapting `data/euler/euler/answers.csv` with the correct answers.
+Putnam, IMC, IMO 2025, USAMO 2025, Miklos Schweitzer 2025 were graded using human verification. They can therefore not be graded automatically. For these competitions, if you want to run them, you will have to adjust their config similar to the USAMO 2026 competition.
 
-*Note*: There are several layers of retries during one run, accounting for rate limiting and other API errors. Runs are not accepted if the model fails to report an answer; to make this less common, we reprompt the model one last time if no answer was reported (`solver.last_chance`). Still, `run.py` might finish without producing `n` runs for each problem. In this case repeat the run, which will by default not repeat the successful runs found in `outputs/`.
+### Competitions Requiring Grading
+For competitions requiring grading (including BrokenArXiv and USAMO), run:
+```bash
+uv run python scripts/judge/judge.py --comp path/to/competition
+```
+There are various agents available for judging, you can see example configs for a couple agents in `configs/judges/`. If you want to add a new agent, you can follow the examples.
 
-### Updating Runs 
 
-Running `uv run python scripts/regrade.py` can be used to update saved runs in several ways:
+### Seeing Results
 
-- Update formatting inconsistencies in serialized runs, most importantly model interactions.
-- Rerun parsing and grading on existing model interactions (useful if parser/grader have been patched after the run).
-- Recompute costs based on token usage (useful if API costs have been updated after the run).
-
-For a default run that regrades all of euler/euler with default parameters (N=4, all updates) run `uv run python scripts/regrade.py --comps euler/euler`.
-
-Another useful script is `scripts/nuke_single_run.py` which given a path to a runs file in `outputs/` removes a specific run at a given index.
-
-### Tracking Progress and Debugging Runs
-
-There are several ways to track progress and debug runs:
-
-1. Track files under `logs/status` which show an updated overview of the progress of all current runs.
-2. Inspect `logs/requests` which verbatim logs each request made to an API in `api_client.py`. As final outputs are postprocessed to a common format, this can be useful to identify API-specific errors. 
-3. Inspect `logs/broken_runs` for runs which unexpectedly could not be saved. 
-4. Launch a local web server that inspects all successful runs that were saved to `output`: `uv run python scripts/app.py --comp path/to/competition`, and access it at [http://localhost:5001/](http://localhost:5001/). This shows the final answers but also full interactions with the model or all steps that an agent took (see for example the runs of `GPT-5 Agent` on `apex/apex_2025`). Warning signs for runs indicate potential problems and should be manually verified. Any warning is caused by one of the following problems:
+Launch a local web server that inspects all successful runs that were saved to `output`: `uv run python app/app.py --comp path/to/competition`, and access it at [http://localhost:5001/](http://localhost:5001/). This shows the final answers but also full interactions with the model or all steps that an agent took (see for example the runs of `GPT-5 Agent` on `apex/apex_2025`). Warning signs for runs indicate potential problems and should be manually verified. Any warning is caused by one of the following problems:
 
   * 💀: parser threw an error or encountered something unexpected.
   * ⚠️: The correct answer might be present in the model answer, but it was not extracted.
   * ❕: Model likely hit max token limit.
-
-If issues are found, delete all runs for that problem by deleting the corresponding output file or use `runs.py:drop_runs` for selective removal. After that, call `run.py` again or only repeat the grading using `scripts/regrade.py` as described above. If the parser requires a manual overwrite, you can do so in the app by clicking on the run, which will show the model answer and allow you to overwrite the correctness of the parsed final answer.
-
-### Uploading Answers to HuggingFace
-You can upload the model answers to HuggingFace as follows:
-```bash
-uv run python scripts/curation/upload_outputs.py --org your_org --repo-name your_repo_name --comp path/to/competition
-```
-This will upload all model answers to a private repository named `your_org/your_repo_name`. `path/to/competition` is the relative path from the `configs/competition` folder to the competition folder (excluding the `.yaml` extension).
-
-### Project Euler
-
-For Project Euler, several additional steps need to be taken. Please check README_euler.md for full details.
 
 ---
 ## 🤖 Adding a New Model/Agent
@@ -169,74 +152,6 @@ Agents are defined via top-level config files (see e.g., `config/models/openai/g
 
 To add a new scaffolding, follow the example of `solvers/selfcheck_agent.py` which uses utility functions from `base_agent.py`.
 
----
-## ➕ Adding a Competition
-
-### Competition Format
-MathArena supports the addition of any benchmark or competition uploaded to HuggingFace (or locally saved using the `datasets` library) that has the following columns:
-- `problem_idx` (int): The id associated with the problem.
-- `problem`(str): The problem statement.
-- `answer` (str, Optional): The answer to the problem. Required for competitions with final answers.
-- `points` (int, Optional): The number of points associated with the problem. Only required for competitions without final answers.
-- `sample_solution` (str, Optional): Sample solution to the problem. Only required for competitions without final answers and during autograding.
-- `sample_grading` (str, Optional): Example of how the grading format should look like. Only required for competitions without final answers and during autograding.
-- `grading_scheme` (list, Optional): The grading scheme for the problem. Only required for competitions without final answers.
-We refer to [the instructions regarding graded competitions](#competitions-requiring-grading) for the specific format of the grading scheme.
-
-### Configuration
-To set up MathArena for evaluation on the competition, you should add a competition config file in the `configs/competitions` folder with the following parameters:
-- `instruction`: Instructions for the model. *Must* require the final answer be in `\boxed{}`.
-- `strict_parsing`: `true` for strict format matching (e.g., only `\boxed{43}` is accepted) or `false` for lenient parsing.
-- `n_problems`: Total number of problems.
-- `date`: Date of the competition, in the format "YYYY-MM-DD".
-- `dataset_path`: Path to the dataset uploaded on HuggingFace or stored locally.
-- `final_answer` (optional): If set to false, the competition is one that is manually graded with judges. Defaults to true if not set.
-
-### Manual Curation and Creation
-To create a pipeline that enables quick curation and easy generation of new competitions, we describe our full process for dataset creation. Note that you do not have to follow these steps if you have another way to generate your benchmark in the appropriate format.
-
-#### Setting Up Competition Files
-In the `data/` folder, create a new directory for your competition with the following structure:
-1. **Problems:**  
-   - Create a subfolder `problems/` and add each problem as a separate LaTeX file named `1.tex`, `2.tex`, ..., `{k}.tex`, where `k` is the number of problems in your competition. You can skip a problem if you want/need to.
-2. **Answers:**  
-   - If the competition is one based on final answers, add an `answers.csv` file with columns `id` and `answer`.
-     - `id`: The problem filename (without the `.tex` extension).
-     - `answer`: The integer answer.
-   - If the competition is evaluated using human judges, add a `grading_scheme.json` file. This file should consist of a list of dictionaries, each of which contain the following fields:
-     - `id`: The problem filename (without the `.tex` extension).
-     - `points`: The maximum number of points for the question.
-     - `scheme`: A list of dictionaries, each containing substeps for which points are awarded. Each dictionary contains the following keys:
-        - `points`: Points associated with this step.
-        - `title`: Title of the step. Should be unique across all dictionaries in this scheme.
-        - `desc`: Description of the step.
-
-#### Verifying Problem Statements
-Ensure your LaTeX problems compile correctly:
-```bash
-uv run python scripts/curation/check_latex.py --comp path/to/competition
-```
-Then, build the `latex/main.tex` to generate a PDF and confirm all problems appear as expected.
-
-#### Upload to HuggingFace
-Finally, you can upload the competition to HuggingFace:
-```bash
-uv run python scripts/curation/upload_competition.py --org your_org --repo-name your_repo_name --comp path/to/competition
-```
-This will upload all answers in the appropriate format to a private repository named `your_org/your_repo_name`. `path/to/competition` is the relative path from the `configs/competition` folder to the competition folder (excluding the `.yaml` extension). Thus, you need to have created the configuration file before uploading to HuggingFace.
-
-### Competitions Requiring Grading
-Competitions requiring grading by LLM judges, can be configured as follows:
-1. First, ensure you have added a `grading_scheme.json` file as described in [Setting Up Competition Files](#setting-up-competition-files). You can also automatically generate grading schemes if you have access to ground-truth solutions. These should be added as a list under the "ground_truth_solutions" key in the competition config file. Additionally, you should add a grading scheme creator config to the competition. See `configs/competitions/usamo/usamo_2026.yaml` for an example. Then, you can run:
-```bash
-uv run python scripts/judge/grading_scheme_creator.py --comp path/to/competition
-```
-2. After the grading scheme is created, you can run the evaluation as described in [Running an Eval](#running-an-eval). Judgment can be performed by adding a judge config to the competition config file. See `configs/competitions/usamo/usamo_2026.yaml` for an example. Run the judges as follows:
-```bash
-uv run python scripts/judge/judge.py --comp path/to/competition
-```
-There are various agents available for judging, you can see example configs for a couple agents in `configs/judges/`. If you want to add a new agent, you can follow the examples.
-3. If you want, you can manually overwrite the judgments by using the app described in [Tracking Progress and Debugging Runs](#tracking-progress-and-debugging-runs) to inspect the model answers and manually change the total grade given.
 
 ---
 ## 📚 Citation

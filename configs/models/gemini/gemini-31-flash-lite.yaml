@@ -1,0 +1,21 @@
+model: gemini-3.1-flash-lite-preview
+api: google
+temperature: null
+top_p: null
+concurrent_requests: 32
+max_tokens: 64000
+cache_read_cost: 0.05
+read_cost: 0.5
+tool_choice: auto
+write_cost: 3
+human_readable_id: Gemini 3.1 Flash Lite
+date: "2026-03-01"
+extra_body:
+  extra_body:
+    google:
+      thinking_config:
+        include_thoughts: true
+        thinking_level: minimal
+other_params:
+  open: false
+  creator: Google
