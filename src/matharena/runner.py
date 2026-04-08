@@ -200,7 +200,7 @@ class Runner:
         tool_descriptions = self.competition_config.get("tools", [])
         POSSIBLE_TOOL_FUNCTIONS = {"execute_code": execute_code, "read_paper": read_paper, 
                                    "query_semantic_scholar": query_semantic_scholar, "read_pages": read_pages, 
-                                   "find_in_paper": find_in_paper, "take_a_break": take_a_break}
+                                   "find_in_paper": find_in_paper}
         tools = []
         for tool_desc in tool_descriptions:
             if model_config.get("use_openai_responses_api_tools", model_config.get("use_openai_responses_api", False)) and "tool_spec_openai_responses_api" in tool_desc:
