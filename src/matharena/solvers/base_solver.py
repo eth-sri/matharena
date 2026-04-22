@@ -19,6 +19,7 @@ class BaseSolver:
         self.default_prompt_template = default_prompt_template
         self.default_api_client_args = default_api_client_args
         self.last_chance_prompt = last_chance_prompt
+        self.lean_environment_override = default_api_client_args.get("lean_environment_override")
 
     def solve_batch(self, stmt_batch: list[tuple[str, Any]], batch_idx_to_problem_idx: dict[int, int], batch_idx_to_run_idx: dict[int, int]):
         """

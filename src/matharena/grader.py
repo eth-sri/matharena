@@ -7,10 +7,11 @@ from collections import defaultdict
 
 from loguru import logger
 
+from matharena.parser import WarningType, check_answers, extract_answer, extract_boxed_answer, parse_answer
 from matharena.tools.submit_answer import check_hash_match
+from matharena.tools.lean_execution import COMPARATOR_TIMEOUT_WARNING, get_lean_feedback_dict_with_formal_statement
 
 from matharena.utils import is_conversation_broken
-from matharena.parser import WarningType, check_answers, extract_answer, extract_boxed_answer, parse_answer
 
 
 def extract_numbers(text):
@@ -135,7 +136,20 @@ def check_output_length(length):
     return length == 1
 
 
-def extract_and_grade(messages, output_tokens, gold_answer, competition_config, debug_info=""):
+def grade_lean_submission(messages, competition_config, problem, debug_info=""):
+    last_message = messages[-1]["content"]
+    formal_statement = problem.get("formal_statement")
+
+    environment = competition_config.get("lean_environment")
+    feedback = get_lean_feedback_dict_with_formal_statement(
+        last_message, formal_statement, environment=environment, messages=messages, use_comparator=True
+    )
+    is_correct = feedback["okay"] and not feedback["errors"]
+    warning = WarningType.POSSIBLE if COMPARATOR_TIMEOUT_WARNING in feedback["warnings"] else WarningType.NONE
+    return None, is_correct, warning.value
+
+
+def extract_and_grade(messages, output_tokens, gold_answer, competition_config, problem=None, debug_info=""):
     """
     Grade the model's messages against the gold answer.
 
@@ -148,14 +162,18 @@ def extract_and_grade(messages, output_tokens, gold_answer, competition_config, 
     """
 
     is_final_answer = competition_config.get("final_answer", True)
+    is_lean_comp = competition_config.get("lean", False)
     use_strict_parsing = competition_config.get("strict_parsing", False)
     use_exact_match = competition_config.get("exact_match_parsing", False)
-
-    gold_answer_is_list = is_final_answer and "," in gold_answer
 
     is_broken, reason = is_conversation_broken(messages)
     if is_broken:
         raise ValueError(f"Message list is broken: {reason}")
+
+    if is_lean_comp:
+        return grade_lean_submission(messages, competition_config, problem, debug_info=debug_info)
+
+    gold_answer_is_list = is_final_answer and "," in gold_answer
 
     last_message = messages[-1]["content"]
     if use_exact_match:

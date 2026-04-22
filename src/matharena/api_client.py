@@ -1,5 +1,6 @@
 """This module provides a unified API for querying various large language models."""
 
+import inspect
 import json
 import os
 import tempfile
@@ -412,7 +413,7 @@ class APIClient:
             if m.get("role", "") == "developer" and not self.no_system_messages:
                 query_prepared[-1]["role"] = "system"  # use system if expected by API
             if m.get("role", "") == "user":
-                check_for_extra_keys(m, ["role", "content"])
+                check_for_extra_keys(m, ["role", "content", "tool_context"])
 
             # Fix images into another format for gemini and grok and qwen and glm
             if (
@@ -534,7 +535,7 @@ class APIClient:
         messages = []
         for content_block in content:
             if isinstance(content_block, ThinkingBlock):
-                messages.append({"role": "assistant", "type": "reasoning", "content": content_block.thinking})
+                messages.append({"role": "assistant", "type": "cot", "content": content_block.thinking})
             elif isinstance(content_block, TextBlock):
                 messages.append({"role": "assistant", "type": "response", "content": content_block.text})
                 break
@@ -551,9 +552,10 @@ class APIClient:
         """
         new_messages = []
         for m in messages:
-            if m.get("role", "") == "assistant" and m.get("type", "response") == "cot":
+            if m.get("role", "") == "assistant" and m.get("type", "response") in ["cot", "thinking", "reasoning"]:
                 continue
-            new_messages.append(m)
+            new_messages.append(m.copy())
+            new_messages[-1].pop("tool_context", None)
 
             # Remove thought signatures for riftrunner and bcn
             if m.get("thought_signature", None) is not None:
@@ -566,6 +568,33 @@ class APIClient:
                         new_messages[-1]["extra_content"]["google"].pop("thought_signature")
 
         return new_messages
+
+    def _get_tool_context(self, messages):
+        tool_context = {}
+        for m in messages:
+            if m.get("role", "") == "user" and isinstance(m.get("tool_context"), dict):
+                tool_context.update(m["tool_context"])
+        return tool_context
+
+    def _execute_tool_function(self, tool_name, arguments, messages):
+        tool_func = self.tool_functions[tool_name]
+        try:
+            signature = inspect.signature(tool_func)
+            arguments = arguments.copy()
+            for param_name, param in signature.parameters.items():
+                if param_name in arguments:
+                    continue
+                if param.kind not in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY):
+                    continue
+                if param_name == "messages":
+                    arguments["messages"] = messages
+                    continue
+                tool_context = self._get_tool_context(messages)
+                if param_name in tool_context:
+                    arguments[param_name] = tool_context[param_name]
+        except (TypeError, ValueError):
+            pass
+        return tool_func(**arguments)
 
     """
         Case 1: VLLM
@@ -757,19 +786,19 @@ class APIClient:
         ts = time.strftime("%m%d-%H:%M:%S", time.localtime(time.time()))
         ts += f".{datetime.now().microsecond:06d}"
         for idx, query in zip(indices, queries):
+            system_message, anthropic_messages = self._convert_to_anthropic_messages(query)
             kwargs_here = self.kwargs.copy()
-            if query[0]["role"] == "system":
-                kwargs_here["system"] = query[0]["content"]
-                query = query[1:]
+            if system_message is not anthropic.NOT_GIVEN:
+                kwargs_here["system"] = system_message
 
             payload = {
                 "custom_id": f"apiquery-{idx}",
-                "params": {"model": self.model, "messages": self._drop_cot(query), **kwargs_here},
+                "params": {"model": self.model, "messages": anthropic_messages, **kwargs_here},
             }
             request_logger.log_request(ts=ts, batch_idx=idx, request=payload)
             request = Request(
                 custom_id=f"apiquery-{idx}",
-                params=MessageCreateParamsNonStreaming(model=self.model, messages=self._drop_cot(query), **kwargs_here),
+                params=MessageCreateParamsNonStreaming(model=self.model, messages=anthropic_messages, **kwargs_here),
             )
             requests.append(request)
 
@@ -841,7 +870,8 @@ class APIClient:
         if len(repeat_indices) > 0:
             logger.info(f"Repeating {len(repeat_indices)} queries.")
             repeat_queries = [queries[i] for i in repeat_indices]
-            repeat_results = self._anthropic_batch_processing(repeat_queries, retry_idx + 1)
+            repeat_api_indices = [indices[i] for i in repeat_indices]
+            repeat_results = self._anthropic_batch_processing(repeat_queries, repeat_api_indices, retry_idx + 1)
             for i, result in zip(repeat_indices, repeat_results):
                 results[i] = result
 
@@ -1190,9 +1220,8 @@ class APIClient:
                     if nb_executed_tool_calls[tool_key] >= max_tool_calls[tool_key]:
                         output = f"Error: Tool call after exceeding max # of tool calls ({max_tool_calls[tool_key]})."
                     else:
-                        tool_func = self.tool_functions[tool_name]
                         try:
-                            output = tool_func(**arguments)
+                            output = self._execute_tool_function(tool_name, arguments, conversation)
                         except Exception as e:
                             logger.error(f"Error executing tool {tool_name}. Exception: {e}")
                             output = f"Error executing tool {tool_name}. Exception: {e}"
@@ -1358,6 +1387,7 @@ class APIClient:
                     request_logger.log_response(ts=ts, batch_idx=idx, exception={"exception": str(e)})
                     time.sleep(60)
                     logger.error(f"Got OpenAI error in responses api inner. Exception: {e}")
+                    response = None
                     continue
             if response is None:
                 raise ValueError("Max inner retries reached.")
@@ -1402,7 +1432,7 @@ class APIClient:
                         output = f"Error: Tool call after exceeding max # of tool calls ({max_tool_calls[tool_key]})."
                     else:
                         try:
-                            output = tool_func(**arguments)  # EXECUTE
+                            output = self._execute_tool_function(function_name, arguments, conversation)
                         except Exception as e:
                             logger.error(f"Error executing tool {function_name}. Exception: {e}")
                             output = f"Error executing tool {function_name}. Exception: {e}"
@@ -1429,7 +1459,7 @@ class APIClient:
                     else:
                         info = ""
                     conversation.append(
-                        {"type": "function_call_output", "call_id": out.call_id, "output": output + info}
+                        {"type": "function_call_output", "call_id": out.call_id, "output": str(output) + info}
                     )
                 elif out.type == "reasoning":
                     """
@@ -1599,12 +1629,16 @@ class APIClient:
                 for tool_call in message.tool_calls:
                     if isinstance(tool_call, dict):
                         function_name = tool_call.get("function", dict()).get("name", "")
+                        tool_call_id = tool_call.get("id")
                     else:
                         function_name = tool_call.function.name
+                        tool_call_id = tool_call.id
                     if function_name not in self.tool_functions:
-                        logger.warning(f"Tool {function_name} not found, skipping.")
+                        logger.warning(f"Tool {function_name} not found.")
+                        conversation.append(
+                            {"role": "tool", "tool_name": function_name, "tool_call_id": tool_call_id, "content": "Error: Tool not found."}
+                        )
                         continue
-                    tool_func = self.tool_functions[function_name]
 
                     # If no budget return error
                     # NOTE: just erroring out here might stop the request loop but the model will be given last chance.
@@ -1616,7 +1650,7 @@ class APIClient:
                         # Execute tool
                         arguments = json.loads(tool_call.function.arguments)
                         try:
-                            output = tool_func(**arguments)
+                            output = self._execute_tool_function(function_name, arguments, conversation)
                         except Exception as e:
                             logger.error(f"Error executing tool {function_name}. Exception: {e}")
                             output = f"Error executing tool {function_name}. Exception: {e}"
@@ -1636,7 +1670,7 @@ class APIClient:
                                 "role": "tool",
                                 "tool_name": function_name,
                                 "tool_call_id": tool_call.id,
-                                "content": output + info,
+                                "content": str(output) + info,
                             }
                         )
 

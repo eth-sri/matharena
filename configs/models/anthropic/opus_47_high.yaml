@@ -1,0 +1,22 @@
+model: claude-opus-4-7
+api: anthropic
+max_tokens: 128000
+concurrent_requests: 32
+temperature: null
+top_p: null
+cache_write_cost: 6.25
+cache_read_cost: 0.5
+read_cost: 5
+write_cost: 25
+thinking:
+  type: adaptive
+output_config:
+  effort: high
+cache_control:
+  type: ephemeral
+batch_processing: true
+human_readable_id: Claude-Opus-4.7 (high)
+date: "2026-04-17"
+other_params:
+  open: false
+  creator: Anthropic

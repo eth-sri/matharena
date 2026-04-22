@@ -3,10 +3,10 @@ from datasets import load_dataset
 import pandas as pd
 import os
 import json
-from matharena.configs import load_configs
 from loguru import logger
 import yaml
 import shutil
+
 
 def get_as_list(string):
     return string.replace('"', "").replace("[", "").replace("]", "").split(',')
@@ -30,46 +30,80 @@ if __name__ == "__main__":
         os.makedirs("temp", exist_ok=True)
 
     all_data = []
+    multi_comp = len(args.comp) > 1
 
     for comp in args.comp:
         folder = os.path.join("data", comp)
-
         competition_config = yaml.safe_load(open(os.path.join(args.competition_configs_folder, comp + ".yaml"), "r"))
+        problem_types = {}
+        source = {}
+        source_metadata = {}
+
+        if os.path.exists(os.path.join(folder, "problem_types.csv")):
+            problem_types = {
+                int(row["id"]): get_as_list(row["type"])
+                for row in pd.read_csv(os.path.join(folder, "problem_types.csv"), dtype=str).to_dict(orient="records")
+            }
+
+        for filename, target in [("source.csv", source), ("source_metadata.csv", source_metadata)]:
+            path = os.path.join(folder, filename)
+            if os.path.exists(path):
+                target.update({
+                    int(row["id"]): {k: v for k, v in row.items() if k != "id" and pd.notna(v)}
+                    for row in pd.read_csv(path, dtype=str).to_dict(orient="records")
+                })
+
+        if competition_config.get("lean", False):
+            original_ids = sorted(
+                int(file.removesuffix(".tex"))
+                for file in os.listdir(os.path.join(folder, "original"))
+                if file.endswith(".tex")
+            )
+            formal_ids = sorted(
+                int(file.removesuffix(".lean"))
+                for file in os.listdir(os.path.join(folder, "problems"))
+                if file.endswith(".lean")
+            )
+            if original_ids != formal_ids:
+                logger.warning(
+                    "Lean statement ids in {} do not match the original statement ids; pairing files by sorted order.",
+                    folder,
+                )
+
+            for idx, formal_idx in zip(original_ids, formal_ids):
+                problem = open(os.path.join(folder, "original", f"{idx}.tex"), "r").read()
+                formal_statement = open(os.path.join(folder, "problems", f"{formal_idx}.lean"), "r").read()
+                data_dict = {
+                    "problem_idx": idx,
+                    "problem": problem,
+                    "answer": formal_statement,
+                    "formal_statement": formal_statement,
+                }
+                if formal_idx in problem_types:
+                    data_dict["problem_type"] = problem_types[formal_idx]
+                data_dict.update(source.get(formal_idx, {}))
+                data_dict.update(source_metadata.get(formal_idx, {}))
+                if multi_comp:
+                    data_dict["competition"] = comp
+                    data_dict["answer"] = str(data_dict.get("answer", ""))
+                all_data.append(data_dict)
+            continue
 
         if competition_config.get("final_answer", True):
             answers = pd.read_csv(os.path.join(folder, "answers.csv"))
-            if os.path.exists(os.path.join(folder, "problem_types.csv")):
-                problem_types = pd.read_csv(os.path.join(folder, "problem_types.csv"))
-                problem_types["type"] = problem_types["type"].apply(get_as_list)
-                answers = answers.merge(problem_types, on="id")
-            ids = list(answers["id"])
         else:
-            answers = json.load(open(os.path.join(folder, "grading_scheme.json"), "r"))
-            answers = pd.DataFrame(answers)
-            answers["id"] = answers["id"].astype(int)
-            ids = list(answers["id"])
-            
-        
-        if os.path.exists(os.path.join(folder, "source.csv")):
-            source = pd.read_csv(os.path.join(folder, "source.csv"))
-            answers = answers.merge(source, on="id")
+            answers = pd.DataFrame(json.load(open(os.path.join(folder, "grading_scheme.json"), "r")))
+        answers["id"] = answers["id"].astype(int)
 
-        for i, idx in enumerate(ids):
-            data_dict = dict()
-            data_dict["problem_idx"] = int(idx)
+        for _, row in answers.sort_values("id").iterrows():
+            idx = int(row["id"])
+            data_dict = {"problem_idx": idx}
 
             if competition_config.get("final_answer", True):
-                if "euler" not in comp:
-                    data_dict["answer"] = answers.iloc[i]["answer"] if not args.add else str(answers.iloc[i]["answer"])
-                else:
-                    data_dict["answer"] = None
-                if "type" in answers.columns:
-                    data_dict["problem_type"] = answers.iloc[i]["type"]
-                if "source" in answers.columns:
-                    data_dict["source"] = answers.iloc[i]["source"]
+                data_dict["answer"] = None if "euler" in comp else row["answer"]
             else:
-                data_dict["points"] = answers.iloc[i]["points"]
-                data_dict["grading_scheme"] = answers.iloc[i]["scheme"]
+                data_dict["points"] = row["points"]
+                data_dict["grading_scheme"] = row["scheme"]
                 sample_solution_file = os.path.join(folder, "solutions", f"{idx}.tex")
                 sample_grading_file = os.path.join(folder, "sample_grading", f"{idx}.txt")
 
@@ -77,19 +111,20 @@ if __name__ == "__main__":
                     data_dict["sample_solution"] = open(sample_solution_file, "r").read()
                 if os.path.exists(sample_grading_file):
                     data_dict["sample_grading"] = open(sample_grading_file, "r").read()
-            
+
             if not args.visual_dataset:
-                problem_file = os.path.join(folder, "problems", f"{idx}.tex")
-                data_dict["problem"] = open(problem_file, "r").read()
+                data_dict["problem"] = open(os.path.join(folder, "problems", f"{idx}.tex"), "r").read()
             else:
                 problem_file = os.path.join(folder, "problems", f"{idx}.png")
-                # copy image to temp folder
-                
-                temp_problem_file = os.path.join("temp", f"{comp.replace("/", "--")}_problem_{idx}.png")
+                temp_problem_file = os.path.join("temp", f"{comp.replace('/', '--')}_problem_{idx}.png")
                 shutil.copy(problem_file, temp_problem_file)
-                data_dict["file_name"] = f"{comp.replace("/", "--")}_problem_{idx}.png"
-            
-            if len(args.comp) > 1:
+                data_dict["file_name"] = f"{comp.replace('/', '--')}_problem_{idx}.png"
+
+            if idx in problem_types:
+                data_dict["problem_type"] = problem_types[idx]
+            data_dict.update(source.get(idx, {}))
+            data_dict.update(source_metadata.get(idx, {}))
+            if multi_comp:
                 data_dict["competition"] = comp
                 data_dict["answer"] = str(data_dict.get("answer", ""))
             all_data.append(data_dict)
@@ -130,6 +165,3 @@ if __name__ == "__main__":
         )
         # remove temp folder
         shutil.rmtree("temp")
-
-
-

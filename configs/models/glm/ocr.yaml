@@ -1,0 +1,10 @@
+model: "zai-org/GLM-OCR"
+api: custom
+base_url: http://localhost:8000/v1
+max_tokens: 8100
+temperature: 0
+read_cost: 0
+write_cost: 0
+concurrent_requests: 8
+human_readable_id: GLM-OCR
+date: "2025-12-12"

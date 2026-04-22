@@ -13,6 +13,7 @@ from torch import ScriptDict
 
 from matharena.configs import extract_existing_configs
 from matharena.json_zst import OUTPUT_JSON_SUFFIX, dump_json_zst, load_json_zst
+from matharena.conversation_rendering import render_conversation_html
 from matharena.utils import normalize_conversation
 
 """
@@ -352,16 +353,16 @@ def get_tick(is_correct, warning, llm_annotation=None):
     elif isinstance(is_correct, str):
         return "❔"
 
-    if (not is_correct) and llm_annotation is True:
+    if llm_annotation is True:
         tick = "🤖"
-    elif is_correct:
-        tick = "✅"
-    elif not is_correct and warning == 0:
-        tick = "❌"
     elif warning >= 3:
         tick = "💀"
     elif warning >= 2:
         tick = "⚠️"
+    elif is_correct:
+        tick = "✅"
+    elif not is_correct and warning == 0:
+        tick = "❌"
     else:
         # small warning
         tick = "❕"
@@ -492,97 +493,8 @@ def model_view(model):
     )
 
 
-def render_message(message):
-    role = message["role"]
-    tagline = ""
-    content = ""
-    code = None
-    is_cot = False
-
-    if role == "developer":
-        tagline = "System Prompt / Developer Message"
-    elif role == "user":
-        tagline = "User"
-    elif role == "tool_response":
-        tool_name = message["tool_name"]
-        tool_call_id = message["tool_call_id"]
-        tagline = f"Response from Tool {tool_name} (Tool Call ID: {tool_call_id})"
-    elif role == "assistant":
-        typ = message.get("type")
-        if typ == "cot":
-            tagline = "Assistant (Chain-of-Thought)"
-            is_cot = True
-        elif typ == "response":
-            tagline = "Assistant"
-        elif typ == "tool_call":
-            tool_name = message["tool_name"]
-            tool_call_id = message["tool_call_id"]
-            tagline = f"Assistant (Tool Call to {tool_name}, Tool Call ID: {tool_call_id})"
-            arguments = message.get("arguments", {})
-            if isinstance(arguments, str):
-                try:
-                    arguments = json.loads(arguments)
-                except json.JSONDecodeError:
-                    arguments = {}
-            
-            formatted_args = ""
-            for k, v in arguments.items():
-                if k == "code":
-                    code = v
-                else:
-                    formatted_args += f"### {k}\n{v}\n\n"
-            
-            if formatted_args:
-                content = formatted_args.strip()
-        elif typ == "internal_tool_call":
-            tool_name = message["tool_name"]
-            assert tool_name == "code_interpreter"
-            tagline = f"Assistant (Internal Tool Call to {tool_name})"
-            code = message.get("code", None)
-        else:
-            raise ValueError(f"Unknown assistant type: {typ}")
-    else:
-        raise ValueError(f"Unknown role: {role}")
-
-    if code is not None:
-        code = code.replace("```python", "").replace("```", "").strip()
-    
-    if not content:
-        content = message.get("content", "")
-
-    if isinstance(content, list):
-        text, img = None, None
-        for c in content:
-            if c["type"] in ["text", "input_text"]:
-                text = c["text"]
-            elif c["type"] == "input_image":
-                img = c["image_url"]
-            elif c["type"] == "image_url":
-                img = c["image_url"]["url"]
-        content = {"text": text, "img": img}
-    else:
-        content = {"text": str(content).strip(), "img": None}
-        
-    return {"tagline": tagline, "content": content, "code": code, "role": role, "is_cot": is_cot}
-
-
-def render_conversation_html(conversation):
-    messages_html = ""
-    for i, message in enumerate(conversation):
-        is_last_message = i == len(conversation) - 1
-        msg_data = render_message(message)
-
-        if (
-            message.get("role") == "assistant"
-            and not msg_data["content"]["text"]
-            and not msg_data["content"]["img"]
-            and not msg_data["code"]
-            and not is_last_message
-        ):
-            continue
-
-        messages_html += render_template("message.html", **msg_data)
-    return messages_html
+def render_conversation_html_with_templates(conversation):
+    return render_conversation_html(conversation, render_template)
 
 
 @app.route("/modelinteraction/<id>")
@@ -609,7 +521,7 @@ def model_interaction(id):
     else:
         model, problem_name, i = tokens
         conversation = results[model][int(problem_name)]["messages"][int(i)]
-        return render_conversation_html(conversation)
+        return render_conversation_html_with_templates(conversation)
 
 
 @app.route("/historystep/<id>")
@@ -628,7 +540,7 @@ def history_step(id):
     if target_step is None:
         return "<div class=\"error\">Step not found</div>"
 
-    return render_conversation_html(target_step["messages"])
+    return render_conversation_html_with_templates(target_step["messages"])
 
 @app.route('/data/<path:filename>')
 def data_files(filename):

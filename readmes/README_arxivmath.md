@@ -23,16 +23,14 @@ Before running the extraction pipeline, remove or archive any old `arxivmath/pap
 The automated pipeline uses DeepSeek-OCR. Start that server in a separate terminal before running `arxivmath/create.sh` or `arxivmath/create_false.sh`:
 
 ```bash
-vllm serve deepseek-ai/DeepSeek-OCR-2 \
-  --tensor-parallel-size 2 \
-  --gpu-memory-utilization 0.75 \
-  --max-num-seqs 4 \
+vllm serve zai-org/GLM-OCR \
+  --port 8000 \
+  --data-parallel-size 2 \
+  --dtype half \
+  --gpu-memory-utilization 0.85 \
   --max-model-len 8192 \
-  --max-num-batched-tokens 8192 \
-  --enforce-eager \
-  --logits_processors vllm.model_executor.models.deepseek_ocr:NGramPerReqLogitsProcessor \
-  --no-enable-prefix-caching \
-  --mm-processor-cache-gb 0
+  --max-num-seqs 8 \
+  --max-num-batched-tokens 12288
 ```
 
 Adjust those `vllm serve` parameters to match your hardware.
@@ -42,9 +40,9 @@ Adjust those `vllm serve` parameters to match your hardware.
 Download the source papers for the target month and run the extraction pipelines. For example, for February 2026:
 
 ```bash
-uv run python arxivmath/download_arxiv_math.py --from 2026-02-01 --until 2026-02-28
-bash arxivmath/create.sh
-bash arxivmath/create_false.sh # For BrokenArXiv.
+uv run python arxivmath/scripts/shared/download_arxiv_math.py --from 2026-02-01 --until 2026-02-28
+bash arxivmath/scripts/create.sh
+bash arxivmath/scripts/create_false.sh # For BrokenArXiv.
 ```
 
 The helper scripts currently run the full extraction stack with the model configs hardcoded in `arxivmath/create.sh` and `arxivmath/create_false.sh`. If you want a different model, edit those scripts or run the underlying commands manually.

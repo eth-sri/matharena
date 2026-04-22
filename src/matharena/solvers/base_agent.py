@@ -55,6 +55,12 @@ class BaseAgent:
         A wrapper that runs a single query (conversation) via the given APIClient and updates the cost state.
         Queries should add user/developer messages in clean format or reuse message blocks from same client.
         """
+        if getattr(self, "tool_context", None) is not None:
+            query = [m.copy() for m in query]
+            for m in query:
+                if m.get("role") == "user" and "tool_context" not in m:
+                    m["tool_context"] = self.tool_context
+                    break
         start_time = time.time()
         ret = list(
             client.run_queries(

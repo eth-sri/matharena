@@ -1,6 +1,7 @@
 """This module defines the base Agent class for solving math problems."""
 
 import time
+from collections import UserDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, override
 
@@ -9,6 +10,10 @@ from tqdm import tqdm
 
 from matharena.api_client import APIClient
 from matharena.solvers import BaseSolver, SelfcheckAgent, SolverResponse, DeepSeekMathAgent
+
+class _PromptFields(UserDict):
+    def __missing__(self, key):
+        return "{" + key + "}"
 
 
 class AgentPool(BaseSolver):
@@ -37,7 +42,14 @@ class AgentPool(BaseSolver):
             default_api_client_args=self.default_api_client_args,
         )
         # TODO: implement image support for agents if needed
-        return agent.solve(stmt[0])
+        if isinstance(stmt[0], dict):
+            prompt_fields = {k: v for k, v in stmt[0].items() if v is not None}
+            prompt_fields.setdefault("problem", prompt_fields.get("problem", "See image."))
+            agent.tool_context = prompt_fields.copy()
+            prompt_text = self.default_prompt_template.format_map(_PromptFields(prompt_fields))
+        else:
+            prompt_text = stmt[0]
+        return agent.solve(prompt_text)
 
     @override
     def solve_batch(self, stmt_batch: list[tuple[str, Any]], batch_idx_to_problem_idx: dict[int, int], batch_idx_to_run_idx: dict[int, int]):

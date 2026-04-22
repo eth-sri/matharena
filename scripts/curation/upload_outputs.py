@@ -42,6 +42,7 @@ if __name__ == "__main__":
     configs = load_configs(args.configs_folder)
 
     competition_config = yaml.safe_load(open(os.path.join(args.competition_configs_folder, args.comp + ".yaml"), "r"))
+    is_lean_comp = competition_config.get("lean", False)
 
     all_data = []
 
@@ -84,8 +85,8 @@ if __name__ == "__main__":
                     "input_tokens": data["detailed_costs"][i]["input_tokens"],
                     "output_tokens": data["detailed_costs"][i]["output_tokens"],
                     "cost": data["detailed_costs"][i]["cost"],
-                    "input_cost_per_tokens": configs[config_path]["read_cost"],
-                    "output_cost_per_tokens": configs[config_path]["write_cost"],
+                    "input_cost_per_tokens": configs[config_path].get("read_cost"),
+                    "output_cost_per_tokens": configs[config_path].get("write_cost"),
                 }
 
                 if "source" in data:
@@ -100,9 +101,19 @@ if __name__ == "__main__":
                         "parsed_answer": data["answers"][i],
                         "correct": data["correct"][i],
                     }
+                elif is_lean_comp:
+                    extra_dict = {
+                        "gold_answer": gold_answer,
+                        "formal_statement": gold_answer,
+                        "correct": data["correct"][i],
+                    }
                 else:
                     extra_dict = dict()
+                    if "correct" in data:
+                        extra_dict["correct"] = data["correct"][i]
                     for j in range(len(data["judgment"])):
+                        if data["judgment"][j] is None:
+                            continue
                         extra_dict_judge = {
                             f"points_judge_{j+1}": data["judgment"][j][i]["points"],
                             f"grading_details_judge_{j+1}": data["judgment"][j][i]["details"],
@@ -116,6 +127,9 @@ if __name__ == "__main__":
     df = pd.DataFrame(all_data)
     if "parsed_answer" in df.columns:
         df["parsed_answer"] = df["parsed_answer"].astype(str)
+    for col in df.columns:
+        if df[col].dtype == "object" and df[col].map(lambda x: isinstance(x, (list, dict))).any():
+            df[col] = df[col].map(lambda x: json.dumps(x, ensure_ascii=False) if isinstance(x, (list, dict)) else x)
     
     if not args.visual_dataset:
         
@@ -146,6 +160,3 @@ if __name__ == "__main__":
 
         # remove temp folder
         shutil.rmtree("temp")
-
-
-

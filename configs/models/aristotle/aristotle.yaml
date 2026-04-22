@@ -1,0 +1,15 @@
+model: aristotle
+api: aristotle
+concurrent_requests: 4
+polling_interval_seconds: 30
+lean_environment_override: lean-4.28.0
+aristotle_toolchain: leanprover/lean4:v4.28.0
+aristotle_mathlib_revision: v4.28.0
+human_readable_id: Aristotle
+custom_instructions:
+  arxivlean/march: |
+    Solve the Lean theorem in `Problem.lean`.
+    Fill the `sorry` in that file and preserve the theorem statement exactly.
+    You may add helper lemmas and definitions in the same file if needed.
+    Do not introduce any axioms, `axiom` declarations, `admit`, `sorry`, or any generated nonstandard axioms.
+    In particular, do not use `native_decide` or any tactic or command whose output would cause `#print axioms` on your theorem or helper lemmas to report anything beyond the standard allowed axioms from Lean/Mathlib.

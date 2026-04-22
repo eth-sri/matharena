@@ -109,14 +109,14 @@ def normalize_conversation(messages):
     clean_messages = []
 
     pending_tool_calls = 0
-    for m in messages:
+    for idx, m in enumerate(messages):
         cm = {}
         if "role" not in m:
             role = "assistant"
-            if m.get("type", "") != "reasoning":
-                logger.warning(
-                    f"Message missing role, defaulting to 'assistant'. This is fully expected for GPT models with response API on Euler with tool use.\n"
-                )
+            # if m.get("type", "") != "reasoning":
+            #     logger.warning(
+            #         f"Message missing role, defaulting to 'assistant'. This is fully expected for GPT models with response API on Euler with tool use.\n"
+            #     )
         else:
             role = m["role"]
 
@@ -124,7 +124,7 @@ def normalize_conversation(messages):
         if role in ["user", "system", "developer"]:
             cm["role"] = "developer" if role == "system" else role
             cm["content"] = m.get("content", m.get("output", ""))
-            check_for_extra_keys(m, ["role", "content"])
+            check_for_extra_keys(m, ["role", "content", "tool_context"])
             clean_messages.append(cm)
             continue
 
@@ -142,8 +142,16 @@ def normalize_conversation(messages):
             if "tool_name" in m or "name" in m:
                 cm["tool_name"] = m.get("tool_name", m.get("name"))
             else:
-                logger.warning(f"Tool response missing tool_name, defaulting to execute_code")
-                cm["tool_name"] = "execute_code"
+                inferred_tool_name = None
+                if "call_id" in m:
+                    for prev in reversed(messages[:idx]):
+                        if prev.get("type", None) == "function_call" and prev.get("call_id", None) == m["call_id"]:
+                            inferred_tool_name = prev.get("tool_name", prev.get("name"))
+                            break
+                if inferred_tool_name is None:
+                    logger.warning("Tool response missing tool_name, defaulting to execute_code")
+                    inferred_tool_name = "execute_code"
+                cm["tool_name"] = inferred_tool_name
 
             # Get tool call id
             if "tool_call_id" in m or "id" in m or "call_id" in m:

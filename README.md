@@ -58,6 +58,8 @@ The scripts `run_all_fa.sh` and `run_all_kangaroo.sh` provide convenient shortcu
 bash scripts/run_all_fa.sh path/to/model
 ```
 
+Importantly, for ArXivLean, make sure to follow [the setup instructions](readmes/README_arxivlean.md) below before running the evaluation.
+
 **Example:**
 ```bash
 uv run python scripts/run.py --comp aime/aime_2025 --models openai/gpt-4o 

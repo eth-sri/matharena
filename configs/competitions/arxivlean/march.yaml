@@ -1,0 +1,140 @@
+instruction: |
+  You are given a formal statement and its natural language description. 
+  Your task is to generate a proof for the statement using Lean v4.29.0.
+  Under no circumstance are you allowed to add any axioms or assumptions. 
+  You can use any definitions, lemmas, or theorems that are already present in the Lean mathematical library (mathlib).
+  You can also use any helper lemmas or definitions that you create yourself.
+  You should not attempt to provide a proof to a weaker statement or attempt to cheat in any way, as this is useless and will be penalized.
+
+  ## Tools
+  You have access to the following tools to assist you in finding a proof:
+  - `verify_lean`: Executes the Lean code and returns the result of the proof attempt, including any error messages if the proof fails.
+  - `verify_submission`: Can be used to verify whether your final proof passes the check imposed by the grader. Its input requires the same format as the final submission and will check whether the proof compiles and is correct, and whether the formal statement matches the one given in the problem.
+  - `add_to_file`: Adds helper Lean code to a persistent file, but only if the whole accumulated file remains valid. Whatever you add here will automatically be prepended to later `verify_lean`, `verify_submission`, and final checking. This can be useful for building up a library of helper lemmas or definitions that you can use across multiple proof attempts, without having to repeat that code in every submission.
+  - `loogle`: Searches Mathlib with loogle and returns matching declarations. Good queries are usually either an exact declaration name or a small type pattern with `_` holes.
+  - `lean_explore_search`: Searches Lean libraries with LeanExplore using natural-language or fuzzy semantic queries. Use this when you know the concept you need, but not the exact theorem name or type shape.
+
+  Good `loogle` examples:
+  - Exact name lookup: `Nat.add_comm`
+  - Search for a commutativity lemma by shape: `(_ + _ = _ + _)`
+  - Search for a monotonicity lemma: `(_ ≤ _ -> _ + _ ≤ _ + _)`
+  - Search for a membership-preservation lemma: `(_ ∈ _ -> _ ∈ _)`
+  - Search for a more structured statement: `(List.replicate (_ + _) _ = _)`
+
+  Common mistakes to avoid in `loogle` queries:
+  - For exact-name lookup, pass the bare declaration name with no quotes, for example `Nat.add_comm`, not `"Nat.add_comm"`.
+  - For shape search, use only short Lean expressions with `_` holes. Do not put `?f`, `?x`, `⊢`, `∀`, lambdas like `fun x =>`, or whole goal states into `loogle`.
+  - If your query is more like words or a mathematical idea than a short Lean expression, use `lean_explore_search` instead of `loogle`.
+
+  Good `lean_explore_search` examples:
+  - `continuous function`
+  - `compact set image`
+  - `strict monotone natural numbers`
+  - `sum of nonnegative terms`
+
+  ## Requirements
+  - You cannot change anything about the formal statement, including no variable renaming or rephrasing. The statement must be **exactly** as given in the problem.
+  - You should follow the output format specified below exactly.
+  - `verify_submission` will only verify your submission accurately if you did not attempt to change the meaning of the statement. Making it pass by using things like `notation` or `alias` to change the names of variables or the statement will be penalized, and will not be accepted as a valid proof.
+
+  ## Output Format
+  Your output should consist of a single lean code block containing the main proof of the statement and any helper lemmas or definitions you think are necessary for the proof.
+  If you used `add_to_file`, **do not** repeat that helper code in the final answer; it is already prepended automatically during checking.
+  If you do, it may cause your submission to be rejected for including duplicated content.
+  Your code block should end with the main proof of the statement, which should directly start with the statement you are proving, and needs to be an exact match for the statement given in the problem.
+  You are not allowed to change the formal statement in any way, including variable renaming or rephrasing.
+  In particular, the theorem statement in the second code block will be replaced with the formal statement from the problem before being checked. 
+  If you are unsure, use the `verify_submission` tool to check whether your proof is in the correct format and will compile successfully before submitting your final answer.
+
+  For instance, you can output something like this:
+
+  ```lean
+  lemma add_zero_helper (n : ℕ) : n + 0 = n := by
+    exact Nat.add_zero n
+
+  theorem my_theorem : ∀ n : ℕ, n + 0 = n := by
+    intro n
+    exact add_zero_helper n
+  ```
+
+  ### Natural Language Problem Statement
+  {problem}
+
+  ### Formal Statement
+  ```lean
+  {formal_statement}
+  ```
+strict_parsing: false
+lean_environment: lean-4.29.0
+n_problems: 41
+date: "2026-03-01"
+lean: true
+final_answer: false
+dataset_path: MathArena/arxivlean-0326
+max_tool_calls: 200
+tools:
+- tool_spec:
+    function:
+      description: 'Executes the Lean code and returns the result of the proof attempt, including any error messages if the proof fails. Imports are automatically handled, so you only need to provide the code for the proof itself.'
+      name: verify_lean
+      parameters:
+        properties:
+          code:
+            description: The Lean code to compile and execute
+            type: string
+        required:
+        - code
+        type: object
+    type: function
+- tool_spec:
+    function:
+      description: 'Checks whether Lean code compiles after replacing the theorem header with the formal statement from the problem. Returns all feedback.'
+      name: verify_submission
+      parameters:
+        properties:
+          code:
+            description: 'The Lean code to test.'
+            type: string
+        required:
+        - code
+        type: object
+    type: function
+- tool_spec:
+    function:
+      description: 'Adds helper Lean code to a persistent file, but only if the whole accumulated file remains valid. Added code is automatically prepended to later Lean checks.'
+      name: add_to_file
+      parameters:
+        properties:
+          code:
+            description: Lean helper lemmas or definitions to add to the persistent file
+            type: string
+        required:
+        - code
+        type: object
+    type: function
+- tool_spec:
+    function:
+      description: 'Searches Mathlib with loogle and returns matching declarations, including names, signatures, modules, and short docstrings.'
+      name: loogle
+      parameters:
+        properties:
+          query:
+            description: The loogle query to run against Mathlib
+            type: string
+        required:
+        - query
+        type: object
+    type: function
+- tool_spec:
+    function:
+      description: 'Semantically searches Lean libraries with LeanExplore using fuzzy or natural-language queries and returns candidate declarations.'
+      name: lean_explore_search
+      parameters:
+        properties:
+          query:
+            description: A natural-language search query
+            type: string
+        required:
+        - query
+        type: object
+    type: function

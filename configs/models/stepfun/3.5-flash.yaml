@@ -10,7 +10,7 @@ date: "2026-02-02"
 temperature: 1
 concurrent_requests: 32
 top_p: 1
-stream_openai_chat_completions: true
+stream_openai_chat_completions: false
 other_params:
   open: true
   creator: StepFun

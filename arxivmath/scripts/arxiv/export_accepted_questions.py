@@ -93,16 +93,12 @@ def main():
     answers_path = os.path.join(args.out_dir, "answers.csv")
     source_path = os.path.join(args.out_dir, "source.csv")
     source_meta_path = os.path.join(args.out_dir, "source_metadata.csv")
-    types_path = os.path.join(args.out_dir, "problem_types.csv")
     with open(answers_path, "w", encoding="utf-8", newline="") as answers_file, open(
         source_path, "w", encoding="utf-8", newline=""
-    ) as source_file, open(source_meta_path, "w", encoding="utf-8", newline="") as source_meta_file, open(
-        types_path, "w", encoding="utf-8", newline=""
-    ) as types_file:
+    ) as source_file, open(source_meta_path, "w", encoding="utf-8", newline="") as source_meta_file:
         answers_writer = csv.writer(answers_file, lineterminator="\n")
         source_writer = csv.writer(source_file, lineterminator="\n")
         source_meta_writer = csv.writer(source_meta_file, lineterminator="\n")
-        types_writer = csv.writer(types_file, lineterminator="\n")
         answers_writer.writerow(["id", "answer"])
         source_writer.writerow(["id", "source"])
         source_meta_writer.writerow(["id", "title", "authors"])

@@ -131,7 +131,7 @@ if __name__ == "__main__":
         logger.info(f"Calling runner for model: {model}")
         prepared_runs = []
         for runner in runners:
-            prepared = runner.prepare_run(model, set_request_metadata=False)
+            prepared = runner.prepare_run(model)
             if prepared is not None:
                 prepared_runs.append((runner, prepared))
 

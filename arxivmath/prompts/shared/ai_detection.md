@@ -20,8 +20,5 @@ For instance,
 ### Current question ###
 {question}
 
-### Current answer ###
-{answer}
-
 ### Full paper text ###
 {full_text}

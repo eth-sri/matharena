@@ -55,7 +55,6 @@ def load_configs(root_dir, remove_extension=True):
 
     return output_configs
 
-
 def exclude_configs(configs, human_readable_ids, exclude_file_path, comp):
     """Excludes configurations based on a regex file.
 

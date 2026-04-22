@@ -14,8 +14,9 @@ from matharena.grader import extract_and_grade
 from matharena.parser import extract_answer
 from matharena.request_logger import request_logger
 from matharena.runs import Runs
-from matharena.solvers import AgentPool, PureModelSolver
+from matharena.solvers import AgentPool, AristotleSolver, PureModelSolver
 from matharena.tools.code_execution import execute_code
+from matharena.tools.lean_execution import add_to_file, lean_explore_search, loogle, verify_lean, verify_lean_with_formal_statement
 from matharena.tools.paper_search import read_paper, query_semantic_scholar, read_pages, find_in_paper
 from matharena.utils import normalize_conversation, save_run_for_recovery
 
@@ -62,10 +63,9 @@ class Runner:
                 problems = [p for p in problems if str(p["problem_idx"]) in [str(pid) for pid in problem_ids]]
             return sorted(problems, key=lambda x: x["problem_idx"])
 
-        if self.competition_config.get("final_answer", True):
-            answers_path = os.path.join(dataset_path, "answers.csv")
-        else:
-            answers_path = os.path.join(dataset_path, "grading_scheme.json")
+        is_lean_comp = self.competition_config.get("lean", False)
+        answers_csv_path = os.path.join(dataset_path, "answers.csv")
+        grading_scheme_path = os.path.join(dataset_path, "grading_scheme.json")
         source_path = os.path.join(dataset_path, "source.csv")
         type_path = os.path.join(dataset_path, "problem_types.csv")
         problems = []
@@ -80,47 +80,73 @@ class Runner:
                         problem_types[problem_id].replace('"', "").replace("[", "").replace("]", "").split(",")
                     )
 
-        with open(answers_path, "r") as f:
-            if self.competition_config.get("final_answer", True):
+        if is_lean_comp:
+            with open(source_path, "r") as f:
                 reader = csv.DictReader(f)
-            else:
-                grading_scheme = json.load(f)
-                reader = []
-                for item in grading_scheme:
-                    reader.append({"id": str(item["id"]), "answer": item["scheme"]})
+                for row in reader:
+                    id_val = int(row["id"])
+                    formal_statement_path = os.path.join(dataset_path, "problems", f"{id_val}.lean")
+                    statement_path = os.path.join(dataset_path, "original", f"{id_val}.tex")
 
-            for row in reader:
-                id_val = int(row["id"])
-                problem_path = os.path.join(dataset_path, "problems", f"{id_val}.tex")
-                if os.path.exists(problem_path):
-                    with open(problem_path, "r") as f_problem:
-                        problem_statement = f_problem.read()
-                    must_have_image = False
+                    with open(formal_statement_path, "r") as f_problem:
+                        formal_statement = f_problem.read()
+                    with open(statement_path, "r") as f_statement:
+                        problem_statement = f_statement.read()
+
+                    problems.append(
+                        {
+                            "problem_idx": id_val,
+                            "problem": problem_statement,
+                            "image": None,
+                            "answer": formal_statement,
+                            "formal_statement": formal_statement,
+                        }
+                    )
+        else:
+            answers_path = answers_csv_path if self.competition_config.get("final_answer", True) else grading_scheme_path
+            with open(answers_path, "r") as f:
+                if self.competition_config.get("final_answer", True):
+                    reader = csv.DictReader(f)
                 else:
-                    problem_statement = None
-                    must_have_image = True
+                    grading_scheme = json.load(f)
+                    reader = []
+                    for item in grading_scheme:
+                        reader.append({"id": str(item["id"]), "answer": item["scheme"]})
 
-                problem_type_val = None
-                if problem_types and id_val in problem_types:
-                    problem_type_val = problem_types[id_val]
+                for row in reader:
+                    id_val = int(row["id"])
+                    problem_path = os.path.join(dataset_path, "problems", f"{id_val}.tex")
+                    if os.path.exists(problem_path):
+                        with open(problem_path, "r") as f_problem:
+                            problem_statement = f_problem.read()
+                        must_have_image = False
+                    else:
+                        problem_statement = None
+                        must_have_image = True
 
-                image_path = os.path.join(dataset_path, "problems", f"{id_val}.png")
-                if os.path.exists(image_path):
-                    with open(image_path, "rb") as image_file:
-                        image_b64 = base64.b64encode(image_file.read()).decode("utf-8")
-                else:
-                    image_b64 = None
-                    assert not must_have_image, f"Problem {id_val} has no text and no image."
+                    problem_type_val = None
+                    if problem_types and id_val in problem_types:
+                        problem_type_val = problem_types[id_val]
 
-                problems.append(
-                    {
-                        "problem_idx": id_val,
-                        "problem": problem_statement,
-                        "image": image_b64,
-                        "answer": row["answer"],
-                        "problem_type": problem_type_val,
-                    }
-                )
+                    image_path = os.path.join(dataset_path, "problems", f"{id_val}.png")
+                    if os.path.exists(image_path):
+                        with open(image_path, "rb") as image_file:
+                            image_b64 = base64.b64encode(image_file.read()).decode("utf-8")
+                    else:
+                        image_b64 = None
+                        assert not must_have_image, f"Problem {id_val} has no text and no image."
+
+                    problems.append(
+                        {
+                            "problem_idx": id_val,
+                            "problem": problem_statement,
+                            "statement": problem_statement,
+                            "image": image_b64,
+                            "answer": row["answer"],
+                            "formal_statement": None,
+                            "problem_type": problem_type_val,
+                        }
+                    )
 
         if os.path.exists(source_path):
             with open(source_path, "r") as f:
@@ -198,9 +224,19 @@ class Runner:
             dict: The default APIClient arguments with tools integrated.
         """
         tool_descriptions = self.competition_config.get("tools", [])
-        POSSIBLE_TOOL_FUNCTIONS = {"execute_code": execute_code, "read_paper": read_paper, 
-                                   "query_semantic_scholar": query_semantic_scholar, "read_pages": read_pages, 
-                                   "find_in_paper": find_in_paper}
+        lean_version = model_config.get("lean_environment_override", self.competition_config.get("lean_environment", None))
+        POSSIBLE_TOOL_FUNCTIONS = {
+            "execute_code": execute_code,
+            "verify_lean": lambda code, messages=None: verify_lean(code, lean_version, messages=messages),
+            "verify_submission": lambda code, formal_statement, messages=None: verify_lean_with_formal_statement(code, formal_statement, lean_version, messages=messages),
+            "add_to_file": lambda code, messages=None: add_to_file(code, lean_version, messages=messages),
+            "loogle": loogle,
+            "lean_explore_search": lean_explore_search,
+            "read_paper": read_paper,
+            "query_semantic_scholar": query_semantic_scholar,
+            "read_pages": read_pages,
+            "find_in_paper": find_in_paper,
+        }
         tools = []
         for tool_desc in tool_descriptions:
             if model_config.get("use_openai_responses_api_tools", model_config.get("use_openai_responses_api", False)) and "tool_spec_openai_responses_api" in tool_desc:
@@ -250,6 +286,8 @@ class Runner:
             BaseSolver: An instance of a solver (PureModelSolver or Agent).
         """
         if solver_config["type"] == "pure_model":
+            if default_api_client_args.get("api") == "aristotle":
+                return AristotleSolver(solver_config, default_prompt_template, default_api_client_args, last_chance_prompt)
             return PureModelSolver(solver_config, default_prompt_template, default_api_client_args, last_chance_prompt)
         elif solver_config["type"] == "agent":
             return AgentPool(solver_config, default_prompt_template, default_api_client_args, last_chance_prompt)
@@ -289,9 +327,11 @@ class Runner:
         logger.info(f"Initializing the solver for {solver_name}")
         if "custom_instructions" in solver_config["model_config"] and self.comp_name in solver_config["model_config"].get("custom_instructions", {}):
             logger.info("Using custom instructions for this competition.")
-            default_prompt_template = solver_config["model_config"]["custom_instructions"][self.comp_name] + "\n\n" + "{problem}"
+            default_prompt_template = solver_config["model_config"]["custom_instructions"][self.comp_name]
         else:
-            default_prompt_template = f"{self.competition_config["instruction"]}\n\n" + "{problem}"
+            default_prompt_template = f"{self.competition_config["instruction"]}"
+        if "{problem}" not in default_prompt_template:
+            default_prompt_template += "\n\n{problem}"
         if "custom_instructions" in solver_config["model_config"]:
             del solver_config["model_config"]["custom_instructions"]
         default_api_client_args = self._prepare_default_api_client_args(solver_config["model_config"])
@@ -303,12 +343,13 @@ class Runner:
         # Load existing runs and prepare one big batch of all new runs we need
         logger.info(f"Loading existing runs for {solver_name}")
         all_runs = {}  # problem_idx -> Runs
-        batch = []  # list of (text, image) problem statements
+        batch = []  # list of (problem payload, image) pairs
         batch_idx_to_problem_idx = {}  # index in batch -> problem_idx
         batch_idx_to_run_idx = {}  # index in batch -> run_idx
+        is_auto_graded_comp = self.is_fa_comp or self.competition_config.get("lean", False)
         for problem in self.problems:
             # Initialize or load problem runs for this problem
-            runs = Runs(self.comp_name, self.is_fa_comp, solver_name, solver_config["type"], problem, output_dir)
+            runs = Runs(self.comp_name, is_auto_graded_comp, solver_name, solver_config["type"], problem, output_dir)
             if self.redo_all:
                 logger.info(f"Not skipping existing runs for problem {problem["problem_idx"]} (will overwrite)")
             else:
@@ -318,12 +359,17 @@ class Runner:
 
             # Add to batch if we need more runs
             for run_idx in range(self.runs_per_problem - runs.N):
+                prompt_payload = {
+                    "problem": problem.get("problem"),
+                }
+                if self.competition_config.get("lean", False):
+                    prompt_payload["formal_statement"] = problem.get("formal_statement")
                 batch.append(
                     (
-                        problem["problem"] if "problem" in problem else None,
+                        prompt_payload,
                         problem["image"] if "image" in problem else None,
                     )
-                )  # (text, image)
+                )  # (problem payload, image)
                 batch_idx_to_problem_idx[len(batch) - 1] = problem["problem_idx"]
                 batch_idx_to_run_idx[len(batch) - 1] = run_idx
 
@@ -395,7 +441,8 @@ class Runner:
 
                 logger.info(f"[{debug_info}] Extracting and grading the answer...")
                 # Extract answer from the run and grade
-                if not self.is_fa_comp:
+                problem = next(p for p in self.problems if p["problem_idx"] == problem_idx)
+                if not self.is_fa_comp and not self.competition_config.get("lean", False):
                     grader_response = (None, "TODO Grading", 0)  # answer, is_correct, warnings
                 else:
                     try:
@@ -406,11 +453,15 @@ class Runner:
                         raise
                     gold_answer = problem_runs.gold_answer
                     try:
+                        grading_config = self.competition_config.copy()
+                        if getattr(solver, "lean_environment_override", None) is not None:
+                            grading_config["lean_environment"] = solver.lean_environment_override
                         grader_response = extract_and_grade(
                             clean_conversation,
                             output_tokens,
                             gold_answer,
-                            self.competition_config,
+                            grading_config,
+                            problem=problem,
                             debug_info=debug_info,
                         )
                     except Exception as e:  # noqa E722
@@ -429,11 +480,15 @@ class Runner:
 
                 # Is this problem done?
                 if problem_runs.N == self.runs_per_problem:
-                    score = sum(problem_runs.correct) if self.is_fa_comp else problem_runs.N
-                    logger.info(
-                        f"Problem {str(problem_idx)} is done. Answers: {problem_runs.answers} vs Gold answer: {problem_runs.gold_answer}. #Correct: {score}"
-
-                    )
+                    score = sum(problem_runs.correct) if (self.is_fa_comp or self.competition_config.get("lean", False)) else problem_runs.N
+                    if not self.competition_config.get("lean", False):
+                        logger.info(
+                            f"Problem {str(problem_idx)} is done. {problem_runs.N} runs completed. Gold answer: {problem_runs.gold_answer}."
+                        )
+                    else:
+                        logger.info(
+                            f"Problem {str(problem_idx)} is done. #Correct: {score}"
+                        )
             except Exception as e:
                 logger.opt(exception=True).error(f"[{debug_info}] Error during response analysis, can't add run. {e}")
         if print_final_status:

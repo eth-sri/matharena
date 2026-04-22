@@ -4,12 +4,13 @@ from pathlib import Path
 import zstandard as zstd
 
 OUTPUT_JSON_SUFFIX = ".json.zst"
+_ZSTD_DECOMPRESSOR = zstd.ZstdDecompressor()
 
 
 def load_json_zst(path):
     path = Path(path)
     with path.open("rb") as f:
-        data = zstd.ZstdDecompressor().decompress(f.read())
+        data = _ZSTD_DECOMPRESSOR.decompress(f.read())
     return json.loads(data.decode("utf-8"))
 
 

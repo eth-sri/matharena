@@ -23,14 +23,17 @@ from matharena.utils import normalize_conversation
 
 FINAL_ANNOTATION_FILENAME = "llm_annotation.json"
 FALSE_ANNOTATION_FILENAME = "llm_metadata_false.json"
+LEAN_ANNOTATION_FILENAME = "metadata_lean_abstract.json"
 
 
-def should_review(annotation, overwrite=False, key="full_text_review"):
+def should_review(annotation, overwrite=False, key="full_text_review", lean_mode=False):
     if annotation.get("keep") is not True:
         return False
     if not overwrite and key in annotation:
         return False
     review = annotation.get("review") or {}
+    if lean_mode:
+        return not review or review.get("status") == "keep"
     if review and review.get("status") != "keep":
         return False
     return True
@@ -48,12 +51,20 @@ def main():
     parser.add_argument("--key", default="full_text_review", help="Annotation key to store the review under.")
     parser.add_argument("--enable-web-search", action="store_true", help="Enable web search for additional context.")
     parser.add_argument("--skip-ocr", action="store_true", help="Skip OCR and full text injection.")
-    parser.add_argument("--false", action="store_true", help="Use the false-statement pipeline.")
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument("--false", action="store_true", help="Use the false-statement pipeline.")
+    mode_group.add_argument("--lean", action="store_true", help="Use the Lean abstract-candidate pipeline.")
     parser.add_argument("--annotation-filename", default=None, help="Annotation filename to read/write.")
     args = parser.parse_args()
 
-    prompt_path = args.prompt or ("arxivmath/prompts/prompt_false_fulltext_review.md" if args.false else "arxivmath/prompts/prompt_fulltext_review.md")
-    annotation_filename = args.annotation_filename or (FALSE_ANNOTATION_FILENAME if args.false else FINAL_ANNOTATION_FILENAME)
+    prompt_path = args.prompt or ("arxivmath/prompts/broken/false_fulltext_review.md" if args.false else "arxivmath/prompts/arxiv/fulltext_review.md")
+    annotation_filename = args.annotation_filename or (
+        LEAN_ANNOTATION_FILENAME
+        if args.lean
+        else FALSE_ANNOTATION_FILENAME
+        if args.false
+        else FINAL_ANNOTATION_FILENAME
+    )
     prompt_template = load_prompt_template(prompt_path)
     model_config_path = resolve_model_config_path(args.model_config)
     model_config = load_model_config(model_config_path)
@@ -78,14 +89,14 @@ def main():
     review_ids = []
     for paper_id in paper_ids:
         annotation = load_annotation(args.paper_root, paper_id, annotation_filename)
-        if should_review(annotation, overwrite=args.overwrite, key=args.key):
+        if should_review(annotation, overwrite=args.overwrite, key=args.key, lean_mode=args.lean):
             review_ids.append(paper_id)
 
     queries = []
     query_paper_ids = []
     for paper_id in tqdm(review_ids):
         annotation = load_annotation(args.paper_root, paper_id, annotation_filename)
-        question = answer = original_statement = perturbed_statement = falsity_explanation = ""
+        question = answer = original_statement = perturbed_statement = falsity_explanation = statement = formalized_statement = ""
         if args.key != "solid_authors":
             if args.false:
                 latest = get_latest_fields(
@@ -95,6 +106,13 @@ def main():
                 if not latest:
                     continue
                 original_statement, perturbed_statement, falsity_explanation = latest
+            elif args.lean:
+                statement = (annotation.get("statement") or "").strip()
+                formalized_statement = (annotation.get("formalized_statement") or "").strip()
+                if not statement:
+                    continue
+                question = statement
+                original_statement = statement
             else:
                 latest = get_latest_pair(annotation)
                 if not latest:
@@ -106,8 +124,10 @@ def main():
             question=question,
             answer=answer,
             original_statement=original_statement,
+            formalized_statement=formalized_statement,
             perturbed_statement=perturbed_statement,
             falsity_explanation=falsity_explanation,
+            statement=statement,
             full_text=full_text or "",
             title=metadata.get("title") or "",
             authors=", ".join([f"{author['forenames']} {author['keyname']}" for author in metadata.get("authors", [])]),
@@ -175,6 +195,17 @@ def main():
                 review["status"] = "keep"
                 annotation["keep"] = True
                 updated.append(paper_id)
+            elif args.lean:
+                edited_statement = parsed.get("statement") if isinstance(parsed, dict) else None
+                if edited_statement and str(edited_statement).strip():
+                    review["statement"] = str(edited_statement).strip()
+                    annotation["statement"] = review["statement"]
+                    review["updated_at"] = review_record["updated_at"]
+                    review["status"] = "keep"
+                    annotation["keep"] = True
+                    updated.append(paper_id)
+                else:
+                    kept.append(paper_id)
             elif edited_question and str(edited_question).strip():
                 review["question"] = str(edited_question).strip()
                 annotation["question"] = review["question"]

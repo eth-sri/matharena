@@ -1,4 +1,6 @@
 from typing import Any, override
+import copy
+from hashlib import md5
 
 from loguru import logger
 
@@ -33,8 +35,27 @@ class SelfcheckAgent(BaseAgent):
             p in self.prompts.keys() for p in expected_prompts
         ), f"SelfcheckAgent expects prompts: {expected_prompts}, got {list(self.prompts.keys())}"
 
+        stringify_params = str(self.model_config) + str(self.scaffold_config)
+        parameter_hash = md5(stringify_params.encode("utf-8")).hexdigest()[:8]
+        run_idx_template = self.scaffold_config.get(
+            "run_idx",
+            "selfcheck_{model_name}_{problem_id}_{run_idx}_{parameter_hash}",
+        )
+        self.RUN_ID = run_idx_template.format(
+            model_name=self.model_config["model"].replace("/", "--"),
+            problem_id=self.problem_idx,
+            parameter_hash=parameter_hash,
+            run_idx=run_idx,
+        )
+
         # Clients
-        self.client = APIClient(**default_api_client_args)
+        self.client = APIClient(**self._clean_client_args(default_api_client_args))
+
+    def _clean_client_args(self, default_api_client_args):
+        args = copy.deepcopy(default_api_client_args)
+        for key in ["human_readable_id", "date", "other_params"]:
+            args.pop(key, None)
+        return args
 
     @override
     def solve(self, stmt: str) -> SolverResponse:
@@ -63,7 +84,7 @@ class SelfcheckAgent(BaseAgent):
             # Verify the current solution
             logger.debug(f"[{self.bi}] Verifying solution.")
             timestep, (is_correct, bug_report) = self.verify_solution(f"verify-it={it}", timestep, stmt, solution)
-            if "yes" in is_correct.lower() and it > 1:
+            if "yes" in is_correct.lower():
                 logger.debug(f"[{self.bi}] Solution verified.")
                 correct_count += 1
                 error_count = 0

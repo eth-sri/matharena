@@ -77,19 +77,16 @@ def main():
 
     source_path = os.path.join(args.out_dir, "source.csv")
     source_meta_path = os.path.join(args.out_dir, "source_metadata.csv")
-    types_path = os.path.join(args.out_dir, "problem_types.csv")
     grading_path = os.path.join(args.out_dir, "grading_scheme.json")
 
     grading_scheme = []
     with open(source_path, "w", encoding="utf-8", newline="") as source_file, open(
         source_meta_path, "w", encoding="utf-8", newline=""
-    ) as source_meta_file, open(types_path, "w", encoding="utf-8", newline="") as types_file:
+    ) as source_meta_file:
         source_writer = csv.writer(source_file, lineterminator="\n")
         source_meta_writer = csv.writer(source_meta_file, lineterminator="\n")
-        types_writer = csv.writer(types_file, lineterminator="\n")
         source_writer.writerow(["id", "source"])
         source_meta_writer.writerow(["id", "title", "authors"])
-        types_writer.writerow(["id", "type"])
 
         for idx, (paper_id, original_statement, statement, metadata) in enumerate(accepted, start=1):
             write_text(os.path.join(problems_dir, f"{idx}.tex"), statement)
@@ -110,7 +107,6 @@ def main():
                     author_names.append(full_name)
             source_writer.writerow([idx, paper_id])
             source_meta_writer.writerow([idx, title, "; ".join(author_names)])
-            types_writer.writerow([idx, "[]"])
 
     with open(grading_path, "w", encoding="utf-8") as f:
         json.dump(grading_scheme, f, indent=2)

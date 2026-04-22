@@ -21,10 +21,9 @@ COMPS=(
 
 # Per-comp n overrides
 declare -A N_VALUES=(
-  ["apex/apex_2025"]=16
+  ["apex/apex_2025"]=8
   # add more overrides here if needed
-  ["arxiv/december"]=4
-  ["arxiv/january"]=4
+  ["arxiv/january"]=2
   ["arxiv_false/march"]=2
 )
 

@@ -1,0 +1,23 @@
+model: moonshotai/kimi-k2.6
+api: openrouter
+max_tokens: 256000
+temperature: 1.0 
+concurrent_requests: 32
+read_cost: 0.95
+cache_read_cost: 0.16
+write_cost: 4
+context_limit: 256000
+human_readable_id: Kimi K2.6 (Think)
+date: "2026-04-20"
+reasoning_effort: high
+extra_body:
+  provider:
+    allow_fallbacks: False
+    order:
+    - moonshotai
+other_params:
+  open: true
+  creator: Moonshot AI
+  parameters: 1000
+  active_parameters: 32
+  huggingface_id: moonshotai/Kimi-K2.5

@@ -13,7 +13,7 @@ import threading
 from loguru import logger
 
 STORE_FOLDER = "paper_search_cache/"
-MODEL_CONFIG_PATH = "configs/models/deepseek/ocr.yaml"
+MODEL_CONFIG_PATH = "configs/models/glm/ocr.yaml"
 os.makedirs(STORE_FOLDER, exist_ok=True)
 _s2_rate_lock = threading.Lock()
 _s2_last_call = 0.0  # monotonic seconds
@@ -93,7 +93,7 @@ def query_semantic_scholar(query, result_limit=100):
     for paper in results.get("data", []):
         oap = paper.get("openAccessPdf") or {}
         url = oap.get("url")
-        if "arxiv" in oap["disclaimer"]:
+        if "arxiv" in oap.get("disclaimer", "").lower():
             arxiv_id = oap["disclaimer"].split("/")[-1].split(",")[0]
             url = f"https://arxiv.org/pdf/{arxiv_id}"
         if not url:
@@ -204,7 +204,7 @@ def ocr(pdf_path, store_filename, store_folder=STORE_FOLDER):
     doc = fitz.open(pdf_path)
     total_pages = doc.page_count
     md_pages = []
-    prompt = "Convert the following image to markdown."
+    prompt = "Text Recognition:"
 
     pages_queries = []
     

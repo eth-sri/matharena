@@ -1,9 +1,15 @@
 """This module defines a Chain-of-Thought (CoT) solver for math problems."""
 
+from collections import UserDict
 from typing import Any, override
 
 from matharena.api_client import APIClient
 from matharena.solvers import BaseSolver, SolverResponse
+
+
+class _PromptFields(UserDict):
+    def __missing__(self, key):
+        return "{" + key + "}"
 
 
 class PureModelSolver(BaseSolver):
@@ -17,11 +23,21 @@ class PureModelSolver(BaseSolver):
         """
         super().__init__(solver_config, default_prompt_template, default_api_client_args, last_chance_prompt)
         self.client = APIClient(**default_api_client_args)
+        last_chance_client_args = default_api_client_args.copy()
+        last_chance_client_args["batch_processing"] = False
+        self.last_chance_client = APIClient(**last_chance_client_args)
 
-    def build_query(self, text: str | None, image_b64):
-        if text is None:
-            text = "See image."
-        prompt = self.default_prompt_template.format(problem=text)
+    def build_query(self, text: str | dict[str, Any] | None, image_b64):
+        tool_context = None
+        if isinstance(text, dict):
+            prompt_fields = {k: v for k, v in text.items() if v is not None}
+            default_problem = prompt_fields.get("problem", "See image.")
+            prompt_fields.setdefault("problem", default_problem)
+            tool_context = prompt_fields.copy()
+        else:
+            prompt_text = "See image." if text is None else text
+            prompt_fields = {"problem": prompt_text}
+        prompt = self.default_prompt_template.format_map(_PromptFields(prompt_fields))
         if image_b64 is not None:
             # NOTE: OpenAI format, needs to be mangled inside for Gemini, Grok
             content = [
@@ -30,7 +46,10 @@ class PureModelSolver(BaseSolver):
             ]
         else:
             content = prompt
-        return [{"role": "user", "content": content}]
+        message = {"role": "user", "content": content}
+        if tool_context is not None:
+            message["tool_context"] = tool_context
+        return [message]
 
     @override
     def solve_batch(self, stmt_batch: list[tuple[str, Any]], batch_idx_to_problem_idx: dict[int, int], batch_idx_to_run_idx: dict[int, int]):
@@ -64,14 +83,13 @@ class PureModelSolver(BaseSolver):
         Returns:
             SolverResponse: The modified response after reprompting the model to report an answer.
         """
-
         # Run queries but there is only one
-        old_queries = previous_response.conversation
-        if old_queries[-1].get("type") == "cot":
-            old_queries = [old_queries + [{"role": "assistent", "content": ""}]]
+        old_queries = [message.copy() for message in previous_response.conversation]
+        if old_queries[-1].get("type") in ["cot", "thinking", "reasoning"]:
+            old_queries.append({"role": "assistant", "content": ""})
 
         new_queries = [old_queries + [{"role": "user", "content": self.last_chance_prompt}]]
-        for idx, conversation, detailed_cost in self.client.run_queries(
+        for idx, conversation, detailed_cost in self.last_chance_client.run_queries(
             new_queries, no_tqdm=True, ignore_tool_calls=True
         ):
             # Important: add old cost to new cost

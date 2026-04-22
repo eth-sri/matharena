@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import os
 
 from matharena.api_client import APIClient
 from matharena.arxivbench_utils import (
@@ -17,11 +18,21 @@ from matharena.utils import normalize_conversation
 
 FINAL_ANNOTATION_FILENAME = "llm_annotation.json"
 FALSE_ANNOTATION_FILENAME = "llm_metadata_false.json"
+LEAN_ANNOTATION_FILENAME = "metadata_lean_abstract.json"
+LEAN_DEFAULT_PROMPT = "arxivmath/prompts/lean/extract_lean_abstract.md"
+ARXIV_NONEXCLUSIVE_LICENSE_URL = "http://arxiv.org/licenses/nonexclusive-distrib/1.0/"
 
 
-def needs_annotation(annotation, overwrite=False, false_mode=False):
+def needs_annotation(annotation, overwrite=False, false_mode=False, lean_mode=False):
     if overwrite:
         return True
+    if lean_mode:
+        keep = annotation.get("keep")
+        if keep is None:
+            return True
+        if keep is True and not annotation.get("statement"):
+            return True
+        return False
     if false_mode:
         if annotation.get("keep") is None:
             return True
@@ -51,20 +62,37 @@ def coerce_bool(value):
     return None
 
 
+def should_skip_license(metadata, skip_arxiv_license=False):
+    if not skip_arxiv_license:
+        return False
+    return (metadata.get("license") or "").strip() == ARXIV_NONEXCLUSIVE_LICENSE_URL
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Generate questions from paper abstracts using an LLM.")
+    parser = argparse.ArgumentParser(description="Generate paper annotations from abstracts using an LLM.")
     parser.add_argument("--model-config", required=True, help="Path under ../configs/models (e.g. openai/gpt-5-mini).")
     parser.add_argument("--paper-root", default="arxivmath/paper", help="Root directory containing paper folders.")
     parser.add_argument("--prompt", default=None, help="Prompt template path.")
     parser.add_argument("--limit", type=int, default=None, help="Optional limit on number of papers to query.")
     parser.add_argument("--max-papers", type=int, default=None, help="Optional limit on paper ids to inspect.")
-    parser.add_argument("--false", action="store_true", help="Use the false-statement pipeline.")
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument("--false", action="store_true", help="Use the false-statement pipeline.")
+    mode_group.add_argument("--lean", action="store_true", help="Use the Lean abstract-candidate pipeline.")
     parser.add_argument("--annotation-filename", default=None, help="Annotation filename to read/write.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing annotations.")
+    parser.add_argument(
+        "--skip-arxiv-license",
+        action="store_true",
+        help="Skip papers using arXiv's non-exclusive distribution-only license.",
+    )
     args = parser.parse_args()
 
-    prompt_path = args.prompt or ("arxivmath/prompts/prompt_false.md" if args.false else "arxivmath/prompts/prompt.md")
-    annotation_filename = args.annotation_filename or (FALSE_ANNOTATION_FILENAME if args.false else FINAL_ANNOTATION_FILENAME)
+    if args.lean:
+        prompt_path = args.prompt or LEAN_DEFAULT_PROMPT
+        annotation_filename = args.annotation_filename or LEAN_ANNOTATION_FILENAME
+    else:
+        prompt_path = args.prompt or ("arxivmath/prompts/broken/false.md" if args.false else "arxivmath/prompts/arxiv/query.md")
+        annotation_filename = args.annotation_filename or (FALSE_ANNOTATION_FILENAME if args.false else FINAL_ANNOTATION_FILENAME)
     prompt_template = load_prompt_template(prompt_path)
     model_config_path = resolve_model_config_path(args.model_config)
     model_config = load_model_config(model_config_path)
@@ -78,20 +106,26 @@ def main():
     query_paper_ids = []
     for paper_id in paper_ids:
         annotation = load_annotation(args.paper_root, paper_id, annotation_filename)
-        if not needs_annotation(annotation, overwrite=args.overwrite, false_mode=args.false):
+        if not needs_annotation(
+            annotation,
+            overwrite=args.overwrite,
+            false_mode=args.false,
+            lean_mode=args.lean,
+        ):
             continue
         metadata = load_metadata(args.paper_root, paper_id)
+        if should_skip_license(metadata, skip_arxiv_license=args.skip_arxiv_license):
+            continue
         prompt = prompt_template.format(
-            title=metadata.get("title") or "",
-            abstract=metadata.get("abstract") or "",
+            title=(metadata.get("title") or "").strip(),
+            abstract=(metadata.get("abstract") or "").strip(),
         )
         queries.append([{"role": "user", "content": prompt}])
         query_paper_ids.append(paper_id)
         if args.limit and len(queries) >= args.limit:
             break
-
+    
     if not queries:
-        print("No papers need annotation.")
         return
 
     total_cost = 0.0
@@ -99,6 +133,7 @@ def main():
     for idx, conversation, cost in client.run_queries(queries):
         conversation = normalize_conversation(conversation)
         paper_id = query_paper_ids[idx]
+        metadata = load_metadata(args.paper_root, paper_id)
         response = ""
         if conversation and isinstance(conversation[-1], dict):
             response = conversation[-1].get("content", "") or ""
@@ -108,11 +143,24 @@ def main():
             "raw": response,
             "cost": cost.get("cost", 0.0),
         }
+        if args.lean:
+            annotation.update(
+                {
+                    "title": metadata.get("title") or "",
+                    "abstract": metadata.get("abstract") or "",
+                    "source_mode": "abstract",
+                }
+            )
         keep_value = None
         if isinstance(parsed, dict):
             keep_value = coerce_bool(parsed.get("keep"))
             annotation["parsed"] = parsed
-            if args.false:
+            if args.lean:
+                if parsed.get("statement"):
+                    annotation["statement"] = str(parsed["statement"]).strip()
+                if parsed.get("rationale"):
+                    annotation["rationale"] = str(parsed["rationale"]).strip()
+            elif args.false:
                 if parsed.get("original_statement"):
                     annotation["original_statement"] = str(parsed["original_statement"]).strip()
                 if parsed.get("perturbed_statement"):

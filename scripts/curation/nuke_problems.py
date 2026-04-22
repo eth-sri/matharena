@@ -9,15 +9,17 @@ For removing problems:
 3. Renumber remaining problems to maintain sequential IDs
 4. Remove corresponding .tex files from problems directory
 5. Remove corresponding .tex files from original directory (if it exists)
-6. Remove corresponding .json files from outputs subdirectories
-7. Update idx fields in remaining JSON files
+6. Remove corresponding .tex files from proofs directory (if it exists)
+7. Remove corresponding .json files from outputs subdirectories
+8. Update idx fields in remaining JSON files
 
 For reordering problems:
 1. Take a permutation of problem IDs
 2. Reorder problems in answers.csv or grading_scheme.json, source.csv, and source_metadata.csv (if it exists)
 3. Rename .tex files in problems directory according to the new order
 4. Rename .tex files in original directory according to the new order (if it exists)
-5. Rename .json files in outputs subdirectories and update their idx field
+5. Rename .tex files in proofs directory according to the new order (if it exists)
+6. Rename .json files in outputs subdirectories and update their idx field
 """
 
 import argparse
@@ -29,6 +31,66 @@ from pathlib import Path
 from typing import Any, Dict, List, Set
 
 from matharena.json_zst import OUTPUT_JSON_SUFFIX, dump_json_zst, load_json_zst
+
+TEXT_DIRECTORIES = ("problems", "original", "proofs")
+
+
+def renumber_rows(rows: List[Dict[str, Any]]) -> None:
+    for i, row in enumerate(rows, 1):
+        row["id"] = str(i)
+
+
+def write_csv_rows(path: str, fieldnames: List[str], rows: List[Dict[str, Any]]) -> None:
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        if rows:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+
+def append_csv_rows(path: str, fieldnames: List[str], rows: List[Dict[str, Any]], create_if_missing: bool = False) -> None:
+    if not rows:
+        return
+    if not os.path.exists(path):
+        if not create_if_missing:
+            return
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+
+    existing_rows = []
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            existing_rows = list(reader)
+
+    current_length = len(existing_rows)
+    for i, row in enumerate(rows, 1):
+        row["id"] = str(current_length + i)
+
+    all_rows = existing_rows + rows
+    write_csv_rows(path, fieldnames, all_rows)
+
+
+def build_competition_paths(project_root: Path, competition: str) -> Dict[str, Path]:
+    data_dir = project_root / "data" / competition
+    return {
+        "data_dir": data_dir,
+        "source_csv": data_dir / "source.csv",
+        "source_metadata_csv": data_dir / "source_metadata.csv",
+        "answers_csv": data_dir / "answers.csv",
+        "grading_scheme_json": data_dir / "grading_scheme.json",
+        "outputs_dir": project_root / "outputs" / competition,
+        **{name: data_dir / name for name in TEXT_DIRECTORIES},
+    }
+
+
+def count_files(directory: str) -> int:
+    if not directory:
+        return 0
+    return len(list(Path(directory).glob("*")))
+
+
+def load_problem_ids(problems_dir: str) -> Set[int]:
+    return set(range(1, count_files(problems_dir) + 1))
 
 
 def parse_problem_ids(problem_ids: List[str]) -> Set[int]:
@@ -58,7 +120,8 @@ def parse_permutation(perm_str: List[str]) -> List[int]:
 
 def reorder_csv_files(source_csv_path: str, source_metadata_csv_path: str, answers_csv_path: str,
                       permutation: List[int], has_source_csv: bool, has_source_metadata_csv: bool,
-                      use_grading_scheme: bool = False, grading_scheme_path: str = None):
+                      num_problems: int, use_grading_scheme: bool = False,
+                      grading_scheme_path: str = None):
     """Reorder metadata plus answers.csv or grading_scheme.json based on a permutation."""
     source_rows_map = {}
     if has_source_csv:
@@ -86,13 +149,11 @@ def reorder_csv_files(source_csv_path: str, source_metadata_csv_path: str, answe
             grading_scheme = json.load(f)
             for row in grading_scheme:
                 grading_scheme_map[int(row['id'])] = row
-        num_problems = len(grading_scheme_map)
     else:
         with open(answers_csv_path, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
                 answers_rows_map[int(row['id'])] = row
-        num_problems = len(answers_rows_map)
 
     if len(permutation) != num_problems:
         print(f"Error: Permutation length ({len(permutation)}) does not match number of problems ({num_problems}).")
@@ -122,41 +183,25 @@ def reorder_csv_files(source_csv_path: str, source_metadata_csv_path: str, answe
                 if has_source_metadata_csv and old_id in source_metadata_rows_map:
                     new_source_metadata_rows.append(source_metadata_rows_map[old_id])
 
-    for i, row in enumerate(new_source_rows, 1):
-        row['id'] = str(i)
-    for i, row in enumerate(new_source_metadata_rows, 1):
-        row['id'] = str(i)
-    for i, row in enumerate(new_answers_rows, 1):
-        row['id'] = str(i)
-    for i, row in enumerate(new_grading_scheme_rows, 1):
-        row['id'] = str(i)
+    renumber_rows(new_source_rows)
+    renumber_rows(new_source_metadata_rows)
+    renumber_rows(new_answers_rows)
+    renumber_rows(new_grading_scheme_rows)
 
     if has_source_csv:
-        with open(source_csv_path, 'w', encoding='utf-8', newline='') as f:
-            if new_source_rows:
-                writer = csv.DictWriter(f, fieldnames=['id', 'source'])
-                writer.writeheader()
-                writer.writerows(new_source_rows)
+        write_csv_rows(source_csv_path, ["id", "source"], new_source_rows)
 
     if has_source_metadata_csv:
         fieldnames = source_metadata_fieldnames or ['id', 'title', 'authors']
         if 'id' not in fieldnames:
             fieldnames = ['id'] + fieldnames
-        with open(source_metadata_csv_path, 'w', encoding='utf-8', newline='') as f:
-            if new_source_metadata_rows:
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(new_source_metadata_rows)
+        write_csv_rows(source_metadata_csv_path, fieldnames, new_source_metadata_rows)
 
     if use_grading_scheme:
         with open(grading_scheme_path, 'w', encoding='utf-8') as f:
             json.dump(new_grading_scheme_rows, f, indent=4, ensure_ascii=False)
     else:
-        with open(answers_csv_path, 'w', encoding='utf-8', newline='') as f:
-            if new_answers_rows:
-                writer = csv.DictWriter(f, fieldnames=['id', 'answer'])
-                writer.writeheader()
-                writer.writerows(new_answers_rows)
+        write_csv_rows(answers_csv_path, ["id", "answer"], new_answers_rows)
     
     return True
 
@@ -271,72 +316,29 @@ def update_csv_files(source_csv_path: str, source_metadata_csv_path: str, answer
                     answers_rows_to.append(row)
     
     # Renumber remaining rows
-    if has_source_csv:
-        for i, row in enumerate(source_rows, 1):
-            row['id'] = str(i)
-
-    if has_source_metadata_csv:
-        for i, row in enumerate(source_metadata_rows, 1):
-            row['id'] = str(i)
-    
-    for i, row in enumerate(answers_rows, 1):
-        row['id'] = str(i)
-    for i, row in enumerate(grading_scheme_rows, 1):
-        row['id'] = str(i)
+    renumber_rows(source_rows)
+    renumber_rows(source_metadata_rows)
+    renumber_rows(answers_rows)
+    renumber_rows(grading_scheme_rows)
     
     # Write back source.csv only if it exists
     if has_source_csv:
-        with open(source_csv_path, 'w', encoding='utf-8', newline='') as f:
-            if source_rows:
-                writer = csv.DictWriter(f, fieldnames=['id', 'source'])
-                writer.writeheader()
-                writer.writerows(source_rows)
+        write_csv_rows(source_csv_path, ["id", "source"], source_rows)
 
     if has_source_metadata_csv:
         fieldnames = source_metadata_fieldnames or ['id', 'title', 'authors']
         if 'id' not in fieldnames:
             fieldnames = ['id'] + fieldnames
-        with open(source_metadata_csv_path, 'w', encoding='utf-8', newline='') as f:
-            if source_metadata_rows:
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(source_metadata_rows)
+        write_csv_rows(source_metadata_csv_path, fieldnames, source_metadata_rows)
     
-    if source_csv_to and os.path.exists(source_csv_to):
-        # get current length of target file to append correctly
-        current_length = 0
-        with open(source_csv_to, 'r', encoding='utf-8') as f:
-            lines = [line for line in f]
-            current_length = sum(1 for line in lines if len(line.strip()) > 0)
-            empty_last_line = "\n" in lines[-1]
-        with open(source_csv_to, 'a', encoding='utf-8', newline="") as f:
-            if not empty_last_line:
-                f.write('\n')
-            writer = csv.DictWriter(f, fieldnames=['id', 'source'])
-            if f.tell() == 0:
-                writer.writeheader()
-            for i, row in enumerate(source_rows_to):
-                row['id'] = str(i + current_length)
-            writer.writerows(source_rows_to)
+    if source_csv_to:
+        append_csv_rows(source_csv_to, ["id", "source"], source_rows_to)
 
-    if source_metadata_csv_to and os.path.exists(source_metadata_csv_to):
-        current_length = 0
-        with open(source_metadata_csv_to, 'r', encoding='utf-8') as f:
-            lines = [line for line in f]
-            current_length = sum(1 for line in lines if len(line.strip()) > 0)
-            empty_last_line = "\n" in lines[-1]
-        with open(source_metadata_csv_to, 'a', encoding='utf-8', newline="") as f:
-            if not empty_last_line:
-                f.write('\n')
-            fieldnames = source_metadata_fieldnames or ['id', 'title', 'authors']
-            if 'id' not in fieldnames:
-                fieldnames = ['id'] + fieldnames
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            if f.tell() == 0:
-                writer.writeheader()
-            for i, row in enumerate(source_metadata_rows_to):
-                row['id'] = str(i + current_length)
-            writer.writerows(source_metadata_rows_to)
+    if source_metadata_csv_to:
+        fieldnames = source_metadata_fieldnames or ['id', 'title', 'authors']
+        if 'id' not in fieldnames:
+            fieldnames = ['id'] + fieldnames
+        append_csv_rows(source_metadata_csv_to, fieldnames, source_metadata_rows_to)
     
     if use_grading_scheme:
         with open(grading_scheme_path, 'w', encoding='utf-8') as f:
@@ -356,36 +358,16 @@ def update_csv_files(source_csv_path: str, source_metadata_csv_path: str, answer
         return len(grading_scheme_rows)
 
     # Write back answers.csv
-    with open(answers_csv_path, 'w', encoding='utf-8', newline='') as f:
-        if answers_rows:
-            writer = csv.DictWriter(f, fieldnames=['id', 'answer'])
-            writer.writeheader()
-            writer.writerows(answers_rows)
+    write_csv_rows(answers_csv_path, ["id", "answer"], answers_rows)
 
     if answers_csv_to:
-        existing_rows = []
-        if os.path.exists(answers_csv_to):
-            with open(answers_csv_to, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                existing_rows = list(reader)
-        else:
-            Path(answers_csv_to).parent.mkdir(parents=True, exist_ok=True)
-
-        current_length = len(existing_rows)
-        for i, row in enumerate(answers_rows_to, 1):
-            row['id'] = str(current_length + i)
-        all_rows = existing_rows + answers_rows_to
-
-        with open(answers_csv_to, 'w', encoding='utf-8', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=['id', 'answer'])
-            writer.writeheader()
-            writer.writerows(all_rows)
+        append_csv_rows(answers_csv_to, ["id", "answer"], answers_rows_to, create_if_missing=True)
 
     return len(answers_rows)
 
-def update_problems_directory(problems_dir: str, ids_to_remove: Set[int], final_count: int, 
+def update_problems_directory(problems_dir: str, ids_to_remove: Set[int],
                               problems_dir_to: str = None, n_to_problems: int = None):
-    """Remove .tex files and renumber remaining ones."""
+    """Remove problem files and renumber remaining ones."""
     problems_path = Path(problems_dir)
     
     if not problems_path.exists():
@@ -404,6 +386,10 @@ def update_problems_directory(problems_dir: str, ids_to_remove: Set[int], final_
         if png_file.exists():
             png_file.unlink()
             print(f"Removed {png_file}")
+        lean_file = problems_path / f"{problem_id}.lean"
+        if lean_file.exists():
+            lean_file.unlink()
+            print(f"Removed {lean_file}")
     
     # Create mapping of old IDs to new IDs
     existing_files = []
@@ -426,6 +412,11 @@ def update_problems_directory(problems_dir: str, ids_to_remove: Set[int], final_
             temp_name_png = problems_path / f"temp_{new_id}.png"
             old_file_png.rename(temp_name_png)
             print(f"Renamed {old_file_png} to {temp_name_png}")
+        old_file_lean = problems_path / f"{old_id}.lean"
+        if old_file_lean.exists():
+            temp_name_lean = problems_path / f"temp_{new_id}.lean"
+            old_file_lean.rename(temp_name_lean)
+            print(f"Renamed {old_file_lean} to {temp_name_lean}")
     
     # Rename from temporary names to final names
     for new_id, temp_file in temp_files:
@@ -437,6 +428,11 @@ def update_problems_directory(problems_dir: str, ids_to_remove: Set[int], final_
             final_file_png = problems_path / f"{new_id}.png"
             temp_file_png.rename(final_file_png)
             print(f"Renamed image file to {new_id}.png")
+        temp_file_lean = problems_path / f"temp_{new_id}.lean"
+        if temp_file_lean.exists():
+            final_file_lean = problems_path / f"{new_id}.lean"
+            temp_file_lean.rename(final_file_lean)
+            print(f"Renamed Lean file to {new_id}.lean")
 
     if problems_dir_to:
         problems_path_to = Path(problems_dir_to)
@@ -534,48 +530,28 @@ def main():
     parser.add_argument("--to-competition", default=None, help="Target competition for moving problems")
 
     args = parser.parse_args()
-    
-    # Define paths relative to project root
+
     script_dir = Path(__file__).parent
-    project_root = script_dir.parent.parent  # Go up from scripts/curation/ to project root
-    data_dir = project_root / "data" / args.competition
-    source_csv = data_dir / "source.csv"
-    source_metadata_csv = data_dir / "source_metadata.csv"
-    answers_csv = data_dir / "answers.csv"
-    grading_scheme_json = data_dir / "grading_scheme.json"
-    problems_dir = data_dir / "problems"
-    original_dir = data_dir / "original"
-    outputs_dir = project_root / "outputs" / args.competition
-
-    data_dir_to = None
-    source_csv_to = None
-    source_metadata_csv_to = None
-    answers_csv_to = None
-    grading_scheme_json_to = None
-    problems_dir_to = None
-    original_dir_to = None
-    outputs_dir_to = None
-    if args.to_competition:
-        data_dir_to = project_root / "data" / args.to_competition
-        source_csv_to = data_dir_to / "source.csv"
-        source_metadata_csv_to = data_dir_to / "source_metadata.csv"
-        answers_csv_to = data_dir_to / "answers.csv"
-        grading_scheme_json_to = data_dir_to / "grading_scheme.json"
-        problems_dir_to = data_dir_to / "problems"
-        original_dir_to = data_dir_to / "original"
-        outputs_dir_to = project_root / "outputs" / args.to_competition
+    project_root = script_dir.parent.parent
+    paths = build_competition_paths(project_root, args.competition)
+    target_paths = build_competition_paths(project_root, args.to_competition) if args.to_competition else {}
     
-    has_source_csv = source_csv.exists()
-    has_source_metadata_csv = source_metadata_csv.exists()
-    has_answers_csv = answers_csv.exists()
-    has_grading_scheme_json = grading_scheme_json.exists()
+    has_source_csv = paths["source_csv"].exists()
+    has_source_metadata_csv = paths["source_metadata_csv"].exists()
+    has_answers_csv = paths["answers_csv"].exists()
+    has_grading_scheme_json = paths["grading_scheme_json"].exists()
     use_grading_scheme = (not has_answers_csv) and has_grading_scheme_json
+    existing_ids = load_problem_ids(str(paths["problems"]))
+    n_problems = len(existing_ids)
 
-    if not has_answers_csv and not has_grading_scheme_json:
-        print("Error: Neither answers.csv nor grading_scheme.json found.")
+    # if not has_answers_csv and not has_grading_scheme_json:
+    #     print("Error: Neither answers.csv nor grading_scheme.json found.")
+    #     return
+    # if has_answers_csv and has_grading_scheme_json:
+    #     print("Warning: Both answers.csv and grading_scheme.json found; defaulting to answers.csv.")
+    if n_problems == 0:
+        print(f"Error: No problem files found in {paths['problems']}.")
         return
-    if has_answers_csv and has_grading_scheme_json:
-        print("Warning: Both answers.csv and grading_scheme.json found; defaulting to answers.csv.")
 
     print(f"Working with competition: {args.competition}")
 
@@ -587,29 +563,30 @@ def main():
         if args.dry_run:
             print("\nDRY RUN - No changes will be made")
             print(f"Would reorder problems with permutation: {permutation}")
-            print(f"Data directory: {data_dir}")
-            print(f"Outputs directory: {outputs_dir}")
+            print(f"Data directory: {paths['data_dir']}")
+            print(f"Outputs directory: {paths['outputs_dir']}")
             return
 
         print(f"\nReordering problems with permutation: {permutation}")
         
         if not reorder_csv_files(
-            str(source_csv),
-            str(source_metadata_csv),
-            str(answers_csv),
+            str(paths["source_csv"]),
+            str(paths["source_metadata_csv"]),
+            str(paths["answers_csv"]),
             permutation,
             has_source_csv,
             has_source_metadata_csv,
+            n_problems,
             use_grading_scheme=use_grading_scheme,
-            grading_scheme_path=str(grading_scheme_json),
+            grading_scheme_path=str(paths["grading_scheme_json"]),
         ):
             print("Aborting due to dataset reordering error.")
             return
         print("Reordered dataset files.")
 
-        reorder_problems_directory(str(problems_dir), permutation)
-        reorder_problems_directory(str(original_dir), permutation)
-        reorder_json_outputs(str(outputs_dir), permutation)
+        for directory_name in TEXT_DIRECTORIES:
+            reorder_problems_directory(str(paths[directory_name]), permutation)
+        reorder_json_outputs(str(paths["outputs_dir"]), permutation)
 
         print(f"\nCompleted! Reordered {len(permutation)} problems.")
 
@@ -621,21 +598,6 @@ def main():
         if not ids_to_remove:
             print("No valid problem IDs provided.")
             return
-        
-        try:
-            existing_ids = set()
-            if use_grading_scheme:
-                with open(grading_scheme_json, 'r', encoding='utf-8') as f:
-                    grading_rows = json.load(f)
-                    for row in grading_rows:
-                        existing_ids.add(int(row['id']))
-            else:
-                with open(answers_csv, 'r', encoding='utf-8') as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        existing_ids.add(int(row['id']))
-        except Exception:
-            existing_ids = ids_to_remove
         
         missing_ids = ids_to_remove - existing_ids
         if missing_ids:
@@ -650,59 +612,48 @@ def main():
         if args.dry_run:
             print("\nDRY RUN - No changes will be made")
             print(f"Would remove problem IDs: {sorted(ids_to_remove)}")
-            print(f"Data directory: {data_dir}")
-            print(f"Outputs directory: {outputs_dir}")
+            print(f"Data directory: {paths['data_dir']}")
+            print(f"Outputs directory: {paths['outputs_dir']}")
             return
         
         print(f"\nRemoving problem IDs: {sorted(ids_to_remove)}")
         
-        final_count = len(existing_ids) - len(ids_to_remove)
+        final_count = n_problems - len(ids_to_remove)
         try:
             final_count = update_csv_files(
-                str(source_csv),
-                str(source_metadata_csv),
-                str(answers_csv),
+                str(paths["source_csv"]),
+                str(paths["source_metadata_csv"]),
+                str(paths["answers_csv"]),
                 ids_to_remove,
                 has_source_csv,
                 has_source_metadata_csv,
-                str(source_csv_to) if source_csv_to else None,
-                str(source_metadata_csv_to) if source_metadata_csv_to else None,
-                str(answers_csv_to) if answers_csv_to else None,
+                str(target_paths["source_csv"]) if target_paths else None,
+                str(target_paths["source_metadata_csv"]) if target_paths else None,
+                str(target_paths["answers_csv"]) if target_paths else None,
                 use_grading_scheme=use_grading_scheme,
-                grading_scheme_path=str(grading_scheme_json),
-                grading_scheme_to=str(grading_scheme_json_to) if grading_scheme_json_to else None,
+                grading_scheme_path=str(paths["grading_scheme_json"]),
+                grading_scheme_to=str(target_paths["grading_scheme_json"]) if target_paths else None,
             )
             print(f"Updated dataset files. {final_count} problems remaining.")
         except Exception as e:
             print(f"Error updating dataset files: {e}")
         
+        n_to_problems = count_files(str(target_paths["problems"])) if target_paths else 0
+        for directory_name in TEXT_DIRECTORIES:
+            target_directory = str(target_paths[directory_name]) if target_paths else None
+            target_count = count_files(target_directory) if target_directory else 0
+            try:
+                update_problems_directory(
+                    str(paths[directory_name]),
+                    ids_to_remove,
+                    target_directory,
+                    target_count,
+                )
+            except Exception as e:
+                print(f"Error updating {directory_name} directory: {e}")
         
-        n_to_problems = 0
-        if problems_dir_to:
-            n_to_problems = len(list(Path(problems_dir_to).glob("*.tex")))
-        try:
-            update_problems_directory(str(problems_dir), ids_to_remove, final_count, 
-                                    str(problems_dir_to) if problems_dir_to else None, 
-                                    n_to_problems)
-        except Exception as e:
-            print(f"Error updating problems directory: {e}")
-
-        n_to_original = 0
-        if original_dir_to:
-            n_to_original = len(list(Path(original_dir_to).glob("*.tex")))
-        try:
-            update_problems_directory(
-                str(original_dir),
-                ids_to_remove,
-                final_count,
-                str(original_dir_to) if original_dir_to else None,
-                n_to_original,
-            )
-        except Exception as e:
-            print(f"Error updating original directory: {e}")
-        
-        update_json_outputs(str(outputs_dir), ids_to_remove, 
-                            str(outputs_dir_to) if outputs_dir_to else None,
+        update_json_outputs(str(paths["outputs_dir"]), ids_to_remove, 
+                            str(target_paths["outputs_dir"]) if target_paths else None,
                             n_to_problems)
         
         print(f"\nCompleted! Removed {len(ids_to_remove)} problems.")
