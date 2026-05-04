@@ -159,10 +159,13 @@ To add a new scaffolding, follow the example of `solvers/selfcheck_agent.py` whi
 ## 📚 Citation
 
 ```
-@article{balunovic2025matharena,
-  title = {MathArena: Evaluating LLMs on Uncontaminated Math Competitions},
-  author = {Mislav Balunović and Jasper Dekoninck and Ivo Petrov and Nikola Jovanović and Martin Vechev},
-  journal = {Proceedings of the Neural Information Processing Systems Track on Datasets and Benchmark},
-  year={2025}
+@article{dekoninck2026matharena,
+      title={Beyond Benchmarks: MathArena as an Evaluation Platform for Mathematics with LLMs}, 
+      author={Jasper Dekoninck and Nikola Jovanović and Tim Gehrunger and Kári Rögnvalddson and Ivo Petrov and Chenhao Sun and Martin Vechev},
+      year={2026},
+      eprint={2605.00674},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2605.00674}, 
 }
 ```
