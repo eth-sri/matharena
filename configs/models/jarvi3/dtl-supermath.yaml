@@ -1,0 +1,7 @@
+human_readable_id: JARVI3 DTL/SuperMath
+type: dtl_supermath
+model: jarvi3-dtl-supermath
+date: '2026-06-30'
+temperature: 0
+max_tokens: 0
+concurrent_requests: 1

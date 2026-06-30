@@ -4,6 +4,7 @@ from .base_agent import BaseAgent
 from .pure_model_solver import PureModelSolver
 from .aristotle_solver import AristotleSolver
 from .codex_cli_solver import CodexCLISolver
+from .dtl_supermath_solver import DTLSuperMathSolver
 from .selfcheck_agent import SelfcheckAgent
 from .math_agent import MathAgent
 from .math_static_agent import StaticMathAgent

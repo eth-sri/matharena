@@ -14,7 +14,7 @@ from matharena.grader import extract_and_grade
 from matharena.parser import extract_answer
 from matharena.request_logger import request_logger
 from matharena.runs import Runs
-from matharena.solvers import AgentPool, AristotleSolver, CodexCLISolver, PureModelSolver
+from matharena.solvers import AgentPool, AristotleSolver, CodexCLISolver, DTLSuperMathSolver, PureModelSolver
 from matharena.tools.code_execution import execute_code, execute_python_code
 from matharena.tools.lean_execution import add_to_file, lean_explore_search, loogle, verify_lean, verify_lean_with_formal_statement
 from matharena.tools.paper_search import read_paper, query_semantic_scholar, read_pages, find_in_paper
@@ -250,6 +250,18 @@ class Runner:
             if "other_params" in solver_config["model_config"]:
                 solver_config["model_config"].pop("other_params")
 
+        elif solver_type == "dtl_supermath":
+            model_config = solver_config
+            solver_config = {
+                "human_readable_id": model_config["human_readable_id"],
+                "type": "dtl_supermath",
+                "model_config": model_config,
+                "scaffold_config": None,
+            }
+            solver_config["model_config"].pop("human_readable_id")
+            if "other_params" in solver_config["model_config"]:
+                solver_config["model_config"].pop("other_params")
+
         return solver_config
 
     def _prepare_default_api_client_args(self, model_config):
@@ -333,6 +345,8 @@ class Runner:
             return AgentPool(solver_config, default_prompt_template, default_api_client_args, last_chance_prompt)
         elif solver_config["type"] == "codex_cli":
             return CodexCLISolver(solver_config, default_prompt_template, default_api_client_args, last_chance_prompt)
+        elif solver_config["type"] == "dtl_supermath":
+            return DTLSuperMathSolver(solver_config, default_prompt_template, default_api_client_args, last_chance_prompt)
         else:
             raise ValueError(f"Unknown solver type: {solver_config['type']}")
 
