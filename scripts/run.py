@@ -28,6 +28,7 @@ def _run_combined_pure_model_group(model_name, group):
     combined_queries = []
     combined_meta = []
     global_batch_idx_to_problem_idx = {}
+    global_batch_idx_to_comp_name = {}
     shared_client = group[0][1]["solver"].client
 
     for runner, prepared in group:
@@ -35,10 +36,17 @@ def _run_combined_pure_model_group(model_name, group):
         for local_idx, stmt in enumerate(prepared["batch"]):
             combined_queries.append(solver.build_query(stmt[0], stmt[1]))
             combined_meta.append((runner, prepared, local_idx))
-            global_batch_idx_to_problem_idx[len(combined_meta) - 1] = prepared["batch_idx_to_problem_idx"][local_idx]
+            global_idx = len(combined_meta) - 1
+            global_batch_idx_to_problem_idx[global_idx] = prepared["batch_idx_to_problem_idx"][local_idx]
+            global_batch_idx_to_comp_name[global_idx] = runner.comp_name
 
     if len(group) > 1:
-        request_logger.set_metadata("multi", model_name, global_batch_idx_to_problem_idx)
+        request_logger.set_metadata(
+            "multi",
+            model_name,
+            global_batch_idx_to_problem_idx,
+            global_batch_idx_to_comp_name,
+        )
     else:
         request_logger.set_metadata(group[0][0].comp_name, model_name, global_batch_idx_to_problem_idx)
     logger.info(
