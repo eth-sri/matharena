@@ -4,12 +4,17 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
+CONTAINER_RUNTIME=docker
+source "$REPO_ROOT/scripts/lib/container_runtime.sh"
+parse_container_runtime "$@"
+set -- "${CONTAINER_ARGS[@]}"
+
 MODE="${1:-screen}"
 if [[ $# -gt 0 ]]; then
   shift
 fi
 if [[ $# -ne 0 || ( "$MODE" != "screen" && "$MODE" != "prepare" ) ]]; then
-  echo "Usage: bash arxivmath/scripts/create.sh [screen|prepare]" >&2
+  echo "Usage: bash arxivmath/scripts/create.sh [screen|prepare] [--container-runtime docker|podman]" >&2
   exit 2
 fi
 
@@ -75,6 +80,7 @@ if [[ "$MODE" == "screen" || "$MODE" == "prepare" ]]; then
 
   uv run python arxivmath/scripts/source/screen_abstracts.py \
     --model-config "$SCREEN_CONFIG" \
+    --container-runtime "$CONTAINER_RUNTIME" \
     --paper-root "$PAPER_ROOT" \
     "${SCOPE_ARGS[@]}" \
     "${SCREEN_OVERWRITE_ARGS[@]}"
@@ -82,7 +88,7 @@ if [[ "$MODE" == "screen" || "$MODE" == "prepare" ]]; then
   if [[ "$MODE" == "screen" ]]; then
     echo "Abstract screening is complete."
     echo "Inspect the accepted-paper count before starting source investigation."
-    echo "Next: nice -n 7 bash arxivmath/scripts/create.sh prepare"
+    echo "Next: nice -n 7 bash arxivmath/scripts/create.sh prepare --container-runtime $CONTAINER_RUNTIME"
     exit 0
   fi
 
@@ -99,6 +105,7 @@ if [[ "$MODE" == "screen" || "$MODE" == "prepare" ]]; then
 
   uv run python arxivmath/scripts/source/investigate_sources.py \
     --model-config "$INVESTIGATOR_CONFIG" \
+    --container-runtime "$CONTAINER_RUNTIME" \
     --paper-root "$PAPER_ROOT" \
     --source-cache "$SOURCE_CACHE" \
     "${SCOPE_ARGS[@]}" \
@@ -109,6 +116,7 @@ if [[ "$MODE" == "screen" || "$MODE" == "prepare" ]]; then
 
   uv run python arxivmath/scripts/source/verify_questions.py \
     --model-config "$VERIFIER_CONFIG" \
+    --container-runtime "$CONTAINER_RUNTIME" \
     --paper-root "$PAPER_ROOT" \
     --source-cache "$SOURCE_CACHE" \
     "${SCOPE_ARGS[@]}" \

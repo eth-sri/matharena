@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim
+FROM docker.io/library/node:22-bookworm-slim
 
 ARG ELAN_VERSION=v4.1.2
 ARG LEAN_TOOLCHAIN=leanprover/lean4:v4.31.0
@@ -56,3 +56,21 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && sage --version \
     && sage -c 'assert ZZ(2026).factor().value() == 2026'
+
+# Preinstall the proof-writing toolchain: evaluation containers cannot install packages.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        latexmk \
+        lmodern \
+        texlive-fonts-recommended \
+        texlive-latex-base \
+        texlive-latex-extra \
+        texlive-latex-recommended \
+        texlive-luatex \
+        texlive-pictures \
+        texlive-science \
+        texlive-xetex \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY tex-smoke /opt/harness-tex-smoke
+RUN sh /opt/harness-tex-smoke/check.sh

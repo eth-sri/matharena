@@ -12,6 +12,18 @@ from ...tools import CLIInstallation, CLIProcessError, compact_json
 _MINIMAL_INSTRUCTIONS = "Use the available shell tools to solve the user's task."
 
 
+def _is_reasoning_extraction_refusal(payload) -> bool:
+    """Check Claude's refusal metadata, never generated or tool text."""
+    if not isinstance(payload, Mapping):
+        return False
+    details = payload.get("stop_details")
+    if isinstance(details, Mapping) and details.get("category") == "reasoning_extraction":
+        return True
+    if payload.get("type") == "system" and payload.get("apiRefusalCategory") == "reasoning_extraction":
+        return True
+    return any(_is_reasoning_extraction_refusal(payload.get(key)) for key in ("message", "delta"))
+
+
 class ClaudeCodeAgent(Agent):
     harness_name = "claude-code"
     aliases = ("claude", "anthropic")
@@ -23,6 +35,12 @@ class ClaudeCodeAgent(Agent):
 
     def model_environment(self) -> dict[str, str]:
         environment = super().model_environment()
+        if getattr(self.model, "auth_mode", None) == "api":
+            endpoint = self.model.endpoint_for("anthropic")
+            if any(name.lower() == "authorization" for name in endpoint.headers):
+                # The CLI gets a placeholder; the host proxy injects the real bearer key.
+                environment["ANTHROPIC_AUTH_TOKEN"] = endpoint.api_key
+                environment["ANTHROPIC_API_KEY"] = ""
         environment["API_TIMEOUT_MS"] = "28800000"
         # Bun's separate socket-idle timer otherwise aborts non-streaming
         # fallback requests after about six minutes, ignoring API_TIMEOUT_MS.
@@ -41,6 +59,7 @@ class ClaudeCodeAgent(Agent):
         last: bool = False,
     ) -> Iterator[AgentEvent]:
         output_limited = False
+        self._reasoning_extraction_refusal = False
         try:
             for event in self._stream_with_capture(
                 message, resume=resume, session_id=session_id, last=last
@@ -58,17 +77,31 @@ class ClaudeCodeAgent(Agent):
                 marker in error.stderr
                 for marker in ("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "max_output_tokens")
             ) and any(word in error.stderr.lower() for word in ("exceeded", "exhausted", "reached"))
-            if not output_limited and not legacy_output_limit:
+            if not self._reasoning_extraction_refusal and not output_limited and not legacy_output_limit:
                 raise
             output_limited = True
         # Drain the terminal usage and reap the CLI before requesting recovery.
         # Some Claude versions report max_tokens with is_error=false and exit 0.
-        if output_limited:
+        if self._reasoning_extraction_refusal:
+            # The provider declined continuation. Keep the terminal usage, but
+            # never enter generic CLI recovery for this refusal category.
+            result = AgentEvent(
+                type="result", content="", session_id=self.session_id,
+                raw={"refusal_category": "reasoning_extraction"},
+            )
+            self._observe(result)
+            yield result
+        elif output_limited:
             raise OutputTokenLimitError(
                 self.build_command(message, resume=resume, session_id=session_id, last=last),
                 1,
                 "Claude stopped at max_output_tokens before completing the response.",
             )
+
+    def _capture_model_response(self, path: str, payload: Mapping[str, Any]) -> None:
+        if _is_reasoning_extraction_refusal(payload):
+            self._reasoning_extraction_refusal = True
+        super()._capture_model_response(path, payload)
 
     def _stream_with_capture(
         self,
@@ -109,6 +142,7 @@ class ClaudeCodeAgent(Agent):
                 listen_host=route.listen_host,
                 client_host=route.client_host,
                 allow_remote_clients=route.allow_remote_clients,
+                offline_models=self._offline_models,
                 unix_socket=route.unix_socket,
                 client_port=route.client_port,
             ) as proxy,
@@ -152,6 +186,13 @@ class ClaudeCodeAgent(Agent):
             "--model",
             self.model_name,
         ]
+        if self.model_name.startswith("anthropic/claude-"):
+            # Let Claude Code recognize the model's capabilities while keeping
+            # its OpenRouter ID on the wire (including web-tool helper calls).
+            canonical = self.model_name.removeprefix("anthropic/").replace(".", "-")
+            command.extend(("--settings", compact_json({
+                "modelOverrides": {canonical: self.model_name},
+            })))
         command.extend(self.model_cli_args())
         if self.minimal_context:
             command.extend(
@@ -163,9 +204,9 @@ class ClaudeCodeAgent(Agent):
                     "--mcp-config",
                     compact_json({"mcpServers": {}}),
                     "--system-prompt",
-                    _MINIMAL_INSTRUCTIONS,
+                    self.network_instructions(_MINIMAL_INSTRUCTIONS),
                     "--tools",
-                    "Bash",
+                    "Bash,WebSearch,WebFetch" if self.internet_enabled else "Bash",
                     "--prompt-suggestions",
                     "false",
                 )
@@ -186,6 +227,8 @@ class ClaudeCodeAgent(Agent):
         return command
 
     def normalize_event(self, event: Mapping[str, Any]) -> list[AgentEvent]:
+        if _is_reasoning_extraction_refusal(event):
+            self._reasoning_extraction_refusal = True
         native_type = str(event.get("type", "event"))
         session_id = event.get("session_id")
         normalized_session_id = str(session_id) if session_id else None

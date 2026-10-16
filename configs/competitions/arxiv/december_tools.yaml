@@ -21,7 +21,7 @@ max_tool_calls:
   read_pages: 10
   find_in_paper: 10
   query_semantic_scholar: 10
-dataset_path: data/arxiv/december
+dataset_path: MathArena/arxivmath-1225
 tools:
 - tool_spec:
     function:

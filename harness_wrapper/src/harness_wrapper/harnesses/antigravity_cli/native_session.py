@@ -74,11 +74,17 @@ def _database(root: Path, session_id: str) -> Path:
     return path
 
 
-def _last_step(root: Path, session_id: str):
+def _last_step(root: Path, session_id: str, *, require_quiescent: bool = False):
     path = _database(root, session_id)
     if not path.is_file():
         return path, None
     with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as connection:
+        # DONE=3, CANCELED=6, ERROR=7. A completed planner message can
+        # coexist with a running background tool; it is not a final answer.
+        if require_quiescent and connection.execute(
+            "SELECT 1 FROM steps WHERE status NOT IN (3, 6, 7) LIMIT 1"
+        ).fetchone():
+            return path, None
         row = connection.execute(
             "SELECT idx, step_type, status, step_payload FROM steps ORDER BY idx DESC LIMIT 1"
         ).fetchone()
@@ -91,9 +97,9 @@ def last_native_step(root: Path, session_id: str) -> int:
 
 
 def read_native_response(
-    root: Path, session_id: str, *, after_step: int = -1
+    root: Path, session_id: str, *, after_step: int = -1, require_quiescent: bool = False
 ) -> NativeResponse | None:
-    path, row = _last_step(root, session_id)
+    path, row = _last_step(root, session_id, require_quiescent=require_quiescent)
     if row is None:
         return None
     idx, step_type, status, payload = row

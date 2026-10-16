@@ -1,7 +1,6 @@
-# DeepSeek-V4.1-Flash uses the official API name deepseek-flash.
-model: deepseek-flash
-api: deepseek
-# Deep Code runs locally; DEEPSEEK_API_KEY pays for the official DeepSeek API.
+model: deepseek/deepseek-v4.1-flash
+api: openrouter
+# Deep Code runs locally; OPENROUTER_API_KEY pays for DeepSeek-only routing.
 harness: deepcode
 harness_version: "0.3.1"
 harness_config:
@@ -14,14 +13,21 @@ harness_config:
 max_tokens: 384000
 temperature: 1
 top_p: 1
-# Peak-hour USD per 1M tokens, verified 2026-09-10:
+# DeepSeek endpoint off-peak USD per 1M tokens, verified 2026-09-18:
 # https://api-docs.deepseek.com/quick_start/pricing/
-read_cost: 0.30
-cache_read_cost: 0.006
-write_cost: 1.20
+read_cost: 0.15
+cache_read_cost: 0.003
+write_cost: 0.60
 reasoning_effort: max
-concurrent_requests: 64
+concurrent_requests: 32
 human_readable_id: DeepSeek-V4.1-Flash (Max)
 date: "2026-09-10"
+extra_body:
+  provider:
+    only:
+    - fireworks
+    allow_fallbacks: false
 other_params:
+  open: true
   creator: DeepSeek
+  huggingface_id: deepseek-ai/DeepSeek-V4.1-Flash

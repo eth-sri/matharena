@@ -1,21 +1,21 @@
 
 {% extends "base.html" %}
+{% from "components.html" import outcomes %}
 
+{% block title %}Problem {{ problem_id }} · {{ model }} · MathArena{% endblock %}
 {% block sidebar %}
     <a href="{{ url_for('model_view', model=sidebar.current_model) }}" class="sidebar-item strong">  {{ sidebar.current_model }}</a>
     <div class="expanded">
         {% for problem, data in sidebar.problems.items() %}
-            <a href="{{ url_for('problem_view', model=sidebar.current_model, problem_name=problem) }}" class="sidebar-item {{ data.class }}">{{ data.name }} {{ data.ticks }}</a>
+            <a href="{{ url_for('problem_view', model=sidebar.current_model, problem_name=problem) }}" class="sidebar-item problem-nav-item {{ data.class }}" {% if data.class == 'current' %}aria-current="page"{% endif %}><span>{{ data.name }}</span><span class="nav-ticks">{{ outcomes(data.ticks) }}</span></a>
         {% endfor %}
     </div>
 {% endblock %}
 
 {% block content %}
-    <h3 style="text-align: left;">Model: {{ model }}</h3>
-    <h3 style="text-align: left;">Problem: {{ problem_name }} {{ ticks }}</h3>
-
     <div class="box problem-box">{% if problem_statement %}<div class="marked">{{ problem_statement }}</div>{% endif %}{% if img_path %}<img src="{{ img_path }}" class="problem-image">{% endif %}</div>
     {% if is_final_answer %}
+        <p class="section-label">Reference answer</p>
         <div class="box solution-box"><div class="marked">{{ solution | trim }}</div></div>
     {% else %}
         {% if grading_scheme_text %}
@@ -40,6 +40,11 @@
                     type="button"
                     class="run-tab-button {{ instance.correct_cls }} {% if loop.first %}active{% endif %}"
                     data-target="run-tab-{{ instance.run }}"
+                    id="run-button-{{ instance.run }}"
+                    role="tab"
+                    tabindex="{{ '0' if loop.first else '-1' }}"
+                    aria-controls="run-tab-{{ instance.run }}"
+                    aria-selected="{{ 'true' if loop.first else 'false' }}"
                 >
                     Run {{ instance.run }}
                 </button>
@@ -47,54 +52,17 @@
         </div>
 
         {% for instance in instances %}
-            <div id="run-tab-{{ instance.run }}" class="run-tabcontent" style="display: {{ 'block' if loop.first else 'none' }};">
-                {%- if is_final_answer -%}
-                    <p class="strong">[Run {{ instance.run }}] Parsed Answer ({{ instance.verdict }}, {{ instance.warnings }} warnings):</p>
-                    <div class="box answer-box {{ instance.correct_cls }}"><div class="marked">{{ instance.answer | trim }}</div></div>
-                    <form method="post" action="{{ url_for('override_result', model=model, problem_name=problem_id, run_idx=instance.run) }}" class="override-form">
-                        <label for="manual-correct-{{ instance.run }}">Manual override:</label>
-                        <select id="manual-correct-{{ instance.run }}" name="manual_correct">
-                            <option value="auto" {% if instance.manual_value == "auto" %}selected{% endif %}>Auto</option>
-                            <option value="correct" {% if instance.manual_value == "correct" %}selected{% endif %}>Correct</option>
-                            <option value="incorrect" {% if instance.manual_value == "incorrect" %}selected{% endif %}>Incorrect</option>
-                        </select>
-                        <button type="submit">Save</button>
-                    </form>
-                {%- endif -%}
-                <details class="strong">
-                    <summary>[Run {{ instance.run }}] Metadata:</summary>
-                    <div class="box metadata-box">
-                        {% if instance.metadata.cost %}
-                        {% set recovery = instance.metadata.cost.token_usage_recovery %}
-                        <p>Cost: ${{ instance.metadata.cost.cost }}{% if recovery and recovery.estimated %} (estimated){% endif %}</p>
-                        <p>Input Tokens: {{ instance.metadata.cost.input_tokens }}</p>
-                        <p>Output Tokens: {{ instance.metadata.cost.output_tokens }}{% if recovery and recovery.estimated %} (includes estimated reasoning){% endif %}</p>
-                        {% if recovery and recovery.warning %}<p>{{ recovery.warning }}</p>{% endif %}
-                            {% if instance.metadata.cost.time %}
-                                <p>Time taken: {{ instance.metadata.cost.time}}s</p>
-                            {% endif %}
-                        {% endif %}
-                        <p>Tool Calls:</p>
-                        {% if instance.metadata.tool_calls %}
-                        <ul>
-                        {% for tool, count in instance.metadata.tool_calls.items() %}
-                            <li>{{ tool }}: {{ count }}</li>
-                        {% endfor %}
-                        </ul>
-                        {% else %}
-                        <p>No tool calls in this solution.</p>
-                        {% endif %}
-                    </div>
-                </details>
-                {% if instance.history and instance.history|length > 0 %}
-                    <details class="response-box-details strong" id="{{ instance.conversation_id }}>>history">
-                        <summary>[Run {{ instance.run }}] History:</summary>
-                    </details>
-                {% endif %}
-                <details class="response-box-details strong" id="{{ instance.conversation_id }}" open>
-                    <summary>[Run {{ instance.run }}] Conversation:</summary>
-                </details>
-                {%- if not is_final_answer -%}
+            <div id="run-tab-{{ instance.run }}" class="run-tabcontent" role="tabpanel" aria-labelledby="run-button-{{ instance.run }}" style="display: {{ 'block' if loop.first else 'none' }};">
+                <dl class="run-metrics">
+                    <div class="primary-cost"><dt>Cost</dt><dd>${{ instance.metadata.cost.cost }}{% if instance.metadata.cost.token_usage_recovery and instance.metadata.cost.token_usage_recovery.estimated %} <abbr class="estimate" title="Includes estimated token usage">est.</abbr>{% endif %}</dd></div>
+                    <div><dt>Input tokens</dt><dd>{{ instance.metadata.cost.input_tokens | default(none) | token_count }}</dd></div>
+                    <div><dt>Cached input</dt><dd>{{ instance.metadata.cost.cached_input_tokens | default(none) | token_count }}</dd></div>
+                    <div><dt>Output tokens</dt><dd>{{ instance.metadata.cost.output_tokens | default(none) | token_count }}</dd></div>
+                </dl>
+                <section class="final-answer" aria-label="Final answer">
+                    <p class="section-label">Final answer</p>
+                    {% if instance.final_response is not none %}{{ instance.final_response | safe }}{% else %}<p>No final response recorded.</p>{% endif %}
+                </section>
                     {%- if instance.judgments and instance.judgments|length > 0 -%}
                         {%- for judgment in instance.judgments -%}
                             <details class="judgment-details" open>
@@ -149,134 +117,58 @@
                             </details>
                         {%- endfor -%}
                     {%- endif -%}
-                {%- endif %}
+                <details class="response-box-details trace-details" id="{{ instance.conversation_id }}" data-trace-only="true">
+                    <summary>Trace</summary>
+                {%- if is_final_answer -%}
+                    <p class="strong">[Run {{ instance.run }}] Parsed Answer ({{ instance.verdict }}, {{ instance.warnings }} warnings):</p>
+                    <div class="box answer-box {{ instance.correct_cls }}"><div class="marked">{{ instance.answer | trim }}</div></div>
+                    {% if overwrite_enabled %}<form method="post" action="{{ url_for('override_result', model=model, problem_name=problem_id, run_idx=instance.run) }}" class="override-form">
+                        <label for="manual-correct-{{ instance.run }}">Manual override:</label>
+                        <select id="manual-correct-{{ instance.run }}" name="manual_correct">
+                            <option value="auto" {% if instance.manual_value == "auto" %}selected{% endif %}>Auto</option>
+                            <option value="correct" {% if instance.manual_value == "correct" %}selected{% endif %}>Correct</option>
+                            <option value="incorrect" {% if instance.manual_value == "incorrect" %}selected{% endif %}>Incorrect</option>
+                        </select>
+                        <button type="submit">Save</button>
+                    </form>{% endif %}
+                {%- endif -%}
+                <details class="strong">
+                    <summary>[Run {{ instance.run }}] Metadata:</summary>
+                    <div class="box metadata-box">
+                        {% if instance.metadata.cost %}
+                        {% set recovery = instance.metadata.cost.token_usage_recovery %}
+                        <p>Cost: ${{ instance.metadata.cost.cost }}{% if recovery and recovery.estimated %} (estimated){% endif %}</p>
+                        <p>Input Tokens: {{ instance.metadata.cost.input_tokens | default(none) | token_count }}</p>
+                        <p>Cached Input Tokens: {{ instance.metadata.cost.cached_input_tokens | default(none) | token_count }}</p>
+                        <p>Output Tokens: {{ instance.metadata.cost.output_tokens | default(none) | token_count }}{% if recovery and recovery.estimated %} (includes estimated reasoning){% endif %}</p>
+                        {% if recovery and recovery.warning %}<p>{{ recovery.warning }}</p>{% endif %}
+                            {% if instance.metadata.cost.time %}
+                                <p>Time taken: {{ instance.metadata.cost.time}}s</p>
+                            {% endif %}
+                        {% endif %}
+                        <p>Tool Calls:</p>
+                        {% if instance.metadata.tool_calls %}
+                        <ul>
+                        {% for tool, count in instance.metadata.tool_calls.items() %}
+                            <li>{{ tool }}: {{ count }}</li>
+                        {% endfor %}
+                        </ul>
+                        {% else %}
+                        <p>No tool calls in this solution.</p>
+                        {% endif %}
+                    </div>
+                </details>
+                {% if instance.history and instance.history|length > 0 %}
+                    <details class="response-box-details strong" id="{{ instance.conversation_id }}>>history">
+                        <summary>[Run {{ instance.run }}] History:</summary>
+                    </details>
+                {% endif %}
+                </details>
             </div>
         {% endfor %}
     {% endif %}
 
-    <style>
-        .run-tab {
-            background-color: #f8f9fa;
-            border-radius: 6px 6px 0 0;
-            margin-top: 1.5rem;
-        }
 
-        .run-tab-button {
-            background-color: inherit;
-            outline: none;
-            cursor: pointer;
-            padding: 14px 17px;
-            transition: background-color 0.3s ease, color 0.3s ease;
-            font-size: 0.95rem;
-            color: #495057;
-            border-top: 1px solid transparent;
-            border-left: 1px solid transparent;
-            border-right: 1px solid #dee2e6;
-            border-bottom: 4px solid transparent;
-        }
-
-        .run-tab-button.correct {
-            border-top: 4px solid #76c77b;
-        }
-
-        .run-tab-button.incorrect {
-            border-top: 4px solid #ff8a80;
-        }
-
-        .run-tab-button:last-child {
-            border-right: none;
-        }
-
-        .run-tab-button:hover {
-            background-color: #e9ecef;
-            color: #0056b3;
-        }
-
-        .run-tab-button.active {
-            background-color: #ffffff;
-            color: #007bff;
-            font-weight: 600;
-        }
-
-        .run-tabcontent {
-            padding: 20px 15px;
-            border: 1px solid #dee2e6;
-            background-color: #ffffff;
-            border-top: none;
-            border-radius: 0 0 6px 6px;
-            line-height: 1.6;
-        }
-
-        .editable-box {
-            white-space: normal;
-        }
-
-        .editable-display {
-            cursor: text;
-            white-space: normal;
-            font-weight: normal;
-        }
-
-        .edit-textarea {
-            width: 100%;
-            box-sizing: border-box;
-            font: inherit;
-            line-height: 1.5;
-            padding: 1rem;
-            border: 1px solid #9aa5b1;
-            border-radius: 8px;
-            resize: vertical;
-            white-space: pre-wrap;
-            min-height: 120px;
-        }
-
-        .save-status {
-            font-size: 0.9rem;
-            color: #4a5568;
-            line-height: 1.2;
-        }
-
-        .save-status:empty {
-            display: none;
-        }
-
-        .save-status:not(:empty) {
-            margin-top: 0.35rem;
-        }
-
-        .judgment-score-row {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            margin: 0 0 0.75rem 0;
-        }
-
-        .judgment-score-field {
-            width: 5rem;
-            font: inherit;
-        }
-
-        .judgment-extra-details {
-            margin-top: 0.85rem;
-        }
-
-        .judgment-extra-details summary {
-            cursor: pointer;
-        }
-
-        .judgment-extra-item + .judgment-extra-item {
-            margin-top: 0.75rem;
-        }
-
-        .judgment-extra-key {
-            margin: 0.45rem 0 0.3rem 0;
-        }
-
-        .judgment-extra-box {
-            font-size: 0.95rem;
-        }
-
-    </style>
 
     <script>
         async function saveJudgment(endpoint, points, desc) {
@@ -338,14 +230,27 @@
                 renderMarkedText(box.querySelector('.editable-display'), box.querySelector('.raw-source').value.trim());
             });
 
-            document.querySelectorAll('.run-tab-button').forEach((button) => {
+            document.querySelectorAll('.run-tab-button').forEach((button, index, buttons) => {
+                button.addEventListener('keydown', (event) => {
+                    let target;
+                    if (event.key === 'ArrowRight') target = buttons[(index + 1) % buttons.length];
+                    if (event.key === 'ArrowLeft') target = buttons[(index + buttons.length - 1) % buttons.length];
+                    if (event.key === 'Home') target = buttons[0];
+                    if (event.key === 'End') target = buttons[buttons.length - 1];
+                    if (target) { event.preventDefault(); target.focus(); target.click(); }
+                });
                 button.addEventListener('click', () => {
                     const targetId = button.dataset.target;
                     document.querySelectorAll('.run-tabcontent').forEach((panel) => {
                         panel.style.display = panel.id === targetId ? 'block' : 'none';
+                        if (panel.id === targetId) {
+                            panel.querySelectorAll('.response-box-details').forEach(loadResponseBox);
+                        }
                     });
                     document.querySelectorAll('.run-tab-button').forEach((other) => {
                         other.classList.toggle('active', other === button);
+                        other.setAttribute('aria-selected', String(other === button));
+                        other.tabIndex = other === button ? 0 : -1;
                     });
                 });
             });

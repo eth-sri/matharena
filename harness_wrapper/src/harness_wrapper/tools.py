@@ -138,6 +138,7 @@ class CLIInstallation:
             "qwen": "qwen-code",
             "muse": "muse-code",
             "opencode": "opencode",
+            "vibe": "mistral-vibe",
         }
         release_name = release_names.get(self.executable, self.executable)
         command = [

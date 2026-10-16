@@ -17,6 +17,7 @@ from harness_wrapper.harnesses.deepcode import DeepCodeAgent
 from harness_wrapper.models.request_capture import RequestCaptureProxy
 from matharena.runner import Runner
 from matharena.solvers.harness_solver import HarnessSolver
+from matharena.token_pricing import TokenPricing
 from test_harness_e2e import _environment, _image_available, _sandbox
 from test_harness_e2e import docker_workspace as shared_docker_workspace
 
@@ -348,7 +349,8 @@ def test_deepcode_real_cli_tools_resume_and_usage_without_paid_credits(
             ).read_text()
         )
         cost = HarnessSolver._detailed_cost(
-            SimpleNamespace(harness="deepcode", config=cost_config), agent
+            SimpleNamespace(harness="deepcode", harness_key="deepcode", config=cost_config,
+                            pricing=TokenPricing.from_config(cost_config)), agent
         )
         assert cost["input_tokens"] == 90 and cost["cached_input_tokens"] == 36
         assert cost["cost"] == pytest.approx(

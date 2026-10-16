@@ -1,0 +1,22 @@
+model: claude-fable-5
+api: anthropic
+max_tokens: 128000
+concurrent_requests: 32
+temperature: null
+top_p: null
+cache_write_cost: 12.5
+cache_read_cost: 1
+read_cost: 10
+write_cost: 50
+thinking:
+  type: adaptive
+output_config:
+  effort: xhigh
+cache_control:
+  type: ephemeral
+batch_processing: true
+human_readable_id: Claude-Fable-5 (xhigh)
+date: "2026-06-09"
+other_params:
+  open: false
+  creator: Anthropic

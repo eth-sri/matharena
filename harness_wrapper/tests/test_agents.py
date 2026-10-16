@@ -299,6 +299,29 @@ def test_oauth_capture_urls_preserve_native_auth_configuration(tmp_path):
     assert kimi.model_environment()["KIMI_CODE_BASE_URL"].endswith("/coding/v1")
 
 
+@pytest.mark.parametrize("bearer", [False, True])
+def test_claude_api_auth_uses_bearer_for_gateways_only(tmp_path, bearer):
+    model = Model(
+        "anthropic/claude-opus-5", api_type="anthropic",
+        api_url="https://openrouter.ai/api" if bearer else "https://api.anthropic.com",
+        api_key="cli-placeholder", reasoning="max",
+        headers={"Authorization": "Bearer host-secret"} if bearer else {"x-api-key": "host-secret"},
+    )
+    agent = make_agent(ClaudeCodeAgent, tmp_path, model=model)
+    agent._request_capture_url = "http://127.0.0.1:2345/secret"
+    environment = agent.model_environment()
+    assert environment["ANTHROPIC_BASE_URL"] == agent._request_capture_url
+    assert "host-secret" not in environment.values()
+    if bearer:
+        assert environment["ANTHROPIC_AUTH_TOKEN"] == "cli-placeholder"
+        assert environment["ANTHROPIC_API_KEY"] == ""
+    else:
+        assert "ANTHROPIC_AUTH_TOKEN" not in environment
+        assert environment["ANTHROPIC_API_KEY"] == "cli-placeholder"
+    command = agent.build_command("solve")
+    assert command[command.index("--effort") + 1] == "max"
+
+
 def test_claude_commands_cover_resume_sandbox_and_native_subagents(tmp_path):
     sandbox = SimpleNamespace(prepare_command=lambda command, cwd, env: (command, cwd, env))
     agent = make_agent(
@@ -705,6 +728,7 @@ def test_kimi_protects_custom_api_headers_with_invocation_local_bridge(tmp_path,
             listen_host="127.0.0.1",
             client_host="127.0.0.1",
             allow_remote_clients=False,
+            offline_models=frozenset(),
             unix_socket=None,
             client_port=None,
         ):
@@ -717,6 +741,7 @@ def test_kimi_protects_custom_api_headers_with_invocation_local_bridge(tmp_path,
             self.listen_host = listen_host
             self.client_host = client_host
             self.allow_remote_clients = allow_remote_clients
+            self.offline_models = offline_models
             self.unix_socket = unix_socket
             self.client_port = client_port
 
@@ -740,6 +765,7 @@ def test_kimi_protects_custom_api_headers_with_invocation_local_bridge(tmp_path,
         listen_host="127.0.0.1",
         client_host="127.0.0.1",
         allow_remote_clients=False,
+        offline_models=frozenset(),
         unix_socket=None,
         client_port=None,
     ):
@@ -753,6 +779,7 @@ def test_kimi_protects_custom_api_headers_with_invocation_local_bridge(tmp_path,
             listen_host=listen_host,
             client_host=client_host,
             allow_remote_clients=allow_remote_clients,
+            offline_models=offline_models,
             unix_socket=unix_socket,
             client_port=client_port,
         )
@@ -874,6 +901,7 @@ def test_kimi_openai_oauth_uses_sandbox_host_service_route(tmp_path, monkeypatch
 
     class Sandbox:
         enabled = True
+        network_enabled = False
         root = tmp_path
 
         @contextmanager
@@ -930,6 +958,7 @@ def test_openrouter_provider_restrictions_use_sandbox_host_service_route(
 
     class Sandbox:
         enabled = True
+        network_enabled = False
         root = tmp_path
 
         @contextmanager
@@ -1379,7 +1408,7 @@ def test_claude_and_kimi_event_normalization(tmp_path):
 
 def test_nonzero_process_raises_but_intentional_interrupt_does_not(tmp_path):
     failure = ProcessSequenceFactory(*[
-        FakeProcess(stderr="bad auth\n", returncode=7) for _ in range(4)
+        FakeProcess(stderr="bad auth\n", returncode=7) for _ in range(11)
     ])
     agent = make_agent(CodexCLIAgent, tmp_path, process_factory=failure)
     with pytest.raises(CLIProcessError) as error:
@@ -1873,7 +1902,7 @@ def test_disabling_quota_wait_does_not_disable_retries(tmp_path):
         agent.run("do the work")
 
     assert agent.trace.events[-1][0] == "error"
-    assert len(factory.calls) == 4
+    assert len(factory.calls) == 11
 
 
 def test_closing_stream_terminates_and_reaps_process(tmp_path):
@@ -2058,7 +2087,7 @@ def test_codex_prompt_input_is_closed_after_spawn_failure(tmp_path):
     agent = make_agent(CodexCLIAgent, tmp_path, process_factory=fail_to_spawn)
     with pytest.raises(OSError, match="spawn failed"):
         agent.run("full prompt")
-    assert len(opened) == 4
+    assert len(opened) == 11
     assert all(handle.closed for handle in opened)
 
 
@@ -2157,3 +2186,18 @@ def test_codex_progress_before_tool_use_is_not_an_empty_turns_answer(tmp_path):
     ]
     events = [event for raw in native for event in agent.normalize_event(raw)]
     assert events[-1].type == "result" and events[-1].content == ""
+
+
+def test_codex_minimal_context_allows_explicit_subagents(tmp_path):
+    agent = make_agent(
+        CodexCLIAgent, tmp_path, minimal_context=True,
+        subagents={"worker": FakeModel("gpt-6-astra")},
+    )
+    command = agent.build_command("delegate")
+    assert "agents.enabled=true" in command
+    assert "agents.enabled=false" not in command
+    enabled = {command[i + 1] for i, arg in enumerate(command[:-1]) if arg == "--enable"}
+    disabled = {command[i + 1] for i, arg in enumerate(command[:-1]) if arg == "--disable"}
+    assert {"multi_agent", "multi_agent_v2"} <= enabled
+    assert not {"multi_agent", "multi_agent_v2"} & disabled
+    assert "plugins" in disabled

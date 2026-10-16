@@ -1,0 +1,20 @@
+\documentclass{amsart}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,mathtools,mathrsfs,stmaryrd}
+\usepackage{enumitem,tikz-cd,hyperref,cleveref}
+\newtheorem{theorem}{Theorem}
+\begin{document}
+\title{MathArena TeX smoke test}
+\maketitle
+\input{proof}
+As in \cite{sample}, the conclusion of \cref{thm:sample} is elementary.
+\[
+  \begin{tikzcd}
+    \mathbb{Z} \arrow[r, "\mathrm{id}"] & \mathbb{Z}
+  \end{tikzcd}
+  \qquad \mathscr{F} = \llbracket 1,2 \rrbracket.
+\]
+\bibliographystyle{plain}
+\bibliography{references}
+\end{document}

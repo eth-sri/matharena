@@ -28,6 +28,12 @@ from .request_capture import (
     _ThreadingUnixHTTPServer,
     response_chunks,
 )
+from .request_policy import (
+    OfflinePolicyError,
+    open_offline_upstream,
+    reject_offline_request,
+    validate_offline_request,
+)
 
 
 def _error_detail(body: bytes, headers: Any) -> str:
@@ -133,6 +139,7 @@ class _HeaderBridgeServer(ThreadingHTTPServer):
     request_drop_fields: frozenset[str]
     tool_call_metadata: _ToolCallMetadataReplay
     allow_remote_clients: bool
+    offline_models: frozenset[str]
     client_api_key: str
     on_request: RequestObserver | None
     on_response: ResponseObserver | None
@@ -146,6 +153,7 @@ class _HeaderBridgeUnixServer(_ThreadingUnixHTTPServer):
     request_drop_fields: frozenset[str]
     tool_call_metadata: _ToolCallMetadataReplay
     allow_remote_clients: bool
+    offline_models: frozenset[str]
     client_api_key: str
     on_request: RequestObserver | None
     on_response: ResponseObserver | None
@@ -230,6 +238,14 @@ class _HeaderBridgeHandler(BaseHTTPRequestHandler):
                     "Could not inspect model request: error_type={error_type}",
                     error_type=type(error).__name__,
                 )
+        if self.server.offline_models:
+            try:
+                validate_offline_request(
+                    self.command, self.path, body, models=self.server.offline_models
+                )
+            except OfflinePolicyError as error:
+                reject_offline_request(self, error)
+                return
         headers = {
             name: value
             for name, value in self.headers.items()
@@ -245,7 +261,10 @@ class _HeaderBridgeHandler(BaseHTTPRequestHandler):
         bound_logger = logger.bind(component="api_header_bridge")
         bound_logger.debug("Forwarding request through custom-header API bridge")
         try:
-            upstream = urllib.request.urlopen(request, timeout=28_800)
+            open_upstream = (
+                open_offline_upstream if self.server.offline_models else urllib.request.urlopen
+            )
+            upstream = open_upstream(request, timeout=28_800)
         except urllib.error.HTTPError as error:
             with error:
                 error_body = error.read()
@@ -338,6 +357,7 @@ class APIHeaderProxy:
         listen_host: str = "127.0.0.1",
         client_host: str = "127.0.0.1",
         allow_remote_clients: bool = False,
+        offline_models: frozenset[str] = frozenset(),
         unix_socket: os.PathLike[str] | None = None,
         client_port: int | None = None,
     ) -> None:
@@ -354,6 +374,7 @@ class APIHeaderProxy:
         self._listen_host = listen_host
         self._client_host = client_host
         self._allow_remote_clients = allow_remote_clients
+        self._offline_models = offline_models
         self._unix_socket = os.fspath(unix_socket) if unix_socket is not None else None
         self._client_port = client_port
         if (self._unix_socket is None) != (client_port is None):
@@ -395,6 +416,7 @@ class APIHeaderProxy:
         server.request_drop_fields = self._request_drop_fields
         server.tool_call_metadata = _ToolCallMetadataReplay()
         server.allow_remote_clients = self._allow_remote_clients
+        server.offline_models = self._offline_models
         server.client_api_key = self.client_api_key
         server.on_request = self._on_request
         server.on_response = self._on_response

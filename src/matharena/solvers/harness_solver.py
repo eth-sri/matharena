@@ -2,7 +2,7 @@
 
 The generic harness lifecycle comes from the vendored ``harness-wrapper``
 package.  This module supplies the MathArena-specific pieces: API credential
-resolution, per-problem workspaces, cost conversion, and a Docker sandbox that
+resolution, per-problem workspaces, cost conversion, and a container sandbox that
 lets the harness reach only a host-side model proxy.
 
 For harnesses, ``time`` and ``request_time`` both measure cumulative wall-clock
@@ -34,6 +34,7 @@ from harness_wrapper import (
     HostServiceRoute,
     InstalledCLI,
     Model,
+    PodmanSandbox,
     Sandbox,
     SandboxMount,
     ensure_cli,
@@ -46,8 +47,11 @@ from harness_wrapper.models.oauth import (
 from loguru import logger
 
 from matharena.api_client import APIClient
+from matharena.container_runtime import validate_container_runtime
 from matharena.solvers import BaseSolver, SolverResponse
 from matharena.solvers.run_budget import RunBudget
+from matharena.solvers.native_usage import NativeUsageReader
+from matharena.token_pricing import TokenPricing
 from matharena.solvers.codex_cli_solver import (
     CONTAINER_BASE_PATH,
     CONTAINER_ELAN_HOME,
@@ -64,6 +68,34 @@ from matharena.solvers.codex_cli_solver import (
 )
 
 
+REASONING_EXTRACTION_MESSAGE = (
+    'The model hit a "reasoning extraction" refusal. We made many attempts to avoid '
+    'such refusals, but could not and are therefore marking the problem as incorrect.'
+)
+
+
+def _append_refusal_message(conversation):
+    conversation.append({
+        "role": "assistant", "type": "response", "content": REASONING_EXTRACTION_MESSAGE,
+    })
+
+
+def _has_reasoning_extraction_refusal(events):
+    return any(event.raw.get("refusal_category") == "reasoning_extraction" for event in events)
+
+
+def _count_harness_retries(events):
+    # Provider-error notifications can precede a retry event. Count only
+    # numbered retry attempts, not both the notification and the retry.
+    return sum(
+        event.type == "recovery"
+        and isinstance(event.content, Mapping)
+        and isinstance(event.content.get("attempt"), int)
+        and event.content["attempt"] > 0
+        for event in events
+    )
+
+
 DEFAULT_WORKSPACE_ROOT = (
     "logs/harness_workspaces/{competition}/{solver_name}/p{problem_idx}_r{run_idx}"
 )
@@ -73,6 +105,9 @@ CONTAINER_HARNESS_CLI_ROOT = PurePosixPath("/opt/harness-cli")
 CONTAINER_HARNESS_PATH = f"{CONTAINER_HARNESS_CLI_ROOT}/bin:{CONTAINER_HARNESS_VENV}/bin:{CONTAINER_BASE_PATH}"
 DEFAULT_HARNESS_DOCKER_IMAGE = "matharena-harness-arxivlean:lean4.31"
 HARNESS_EXECUTABLES = {
+    "grok": "grok",
+    "grok-build": "grok",
+    "grok-cli": "grok",
     "muse": "muse",
     "muse-code": "muse",
     "muse-cli": "muse",
@@ -99,8 +134,15 @@ HARNESS_EXECUTABLES = {
     "deepcode": "deepcode",
     "deepcode-cli": "deepcode",
     "deep-code": "deepcode",
+    "vibe": "vibe",
+    "vibe-cli": "vibe",
+    "mistral-vibe": "vibe",
+    "mistral": "vibe",
 }
 HARNESS_RELEASES = {
+    "grok": "grok-build",
+    "grok-build": "grok-build",
+    "grok-cli": "grok-build",
     "muse": "muse-code",
     "muse-code": "muse-code",
     "muse-cli": "muse-code",
@@ -127,6 +169,10 @@ HARNESS_RELEASES = {
     "deepcode": "deepcode",
     "deepcode-cli": "deepcode",
     "deep-code": "deepcode",
+    "vibe": "mistral-vibe",
+    "vibe-cli": "mistral-vibe",
+    "mistral-vibe": "mistral-vibe",
+    "mistral": "mistral-vibe",
 }
 INLINE_CONTAINER_ENV = frozenset(
     {
@@ -156,6 +202,7 @@ class DockerHarnessSandbox(Sandbox):
     the public network directly.
     """
 
+    network_enabled: bool = False
     image: str = DEFAULT_HARNESS_DOCKER_IMAGE
     container_root: PurePosixPath = field(
         default_factory=lambda: DEFAULT_CONTAINER_ROOT
@@ -326,6 +373,56 @@ class DockerHarnessSandbox(Sandbox):
             )
 
 
+@dataclass(slots=True)
+class PodmanHarnessSandbox(PodmanSandbox):
+    """Podman proxy isolation with MathArena's named-container cancellation."""
+
+    network_enabled: bool = False
+    image: str = DEFAULT_HARNESS_DOCKER_IMAGE
+    container_root: PurePosixPath = field(
+        default_factory=lambda: DEFAULT_CONTAINER_ROOT
+    )
+    container_name: str = field(
+        default_factory=lambda: f"matharena-{os.getpid()}-{secrets.token_hex(8)}"
+    )
+
+    def prepare_command(
+        self,
+        command: str | Sequence[str],
+        *,
+        cwd: Path,
+        env: Mapping[str, str] | None = None,
+    ) -> tuple[list[str], Path, dict[str, str]]:
+        explicit_env = {str(key): str(value) for key, value in (env or {}).items()}
+        # Keep Podman's own HOME/XDG/PATH intact so it uses the host's image
+        # store and configuration. Container paths are safe to pass inline;
+        # credentials still use name-only --env entries from the base sandbox.
+        process_values = {
+            key: value for key, value in explicit_env.items()
+            if key not in INLINE_CONTAINER_ENV
+        }
+        argv, host_cwd, process_env = super(PodmanHarnessSandbox, self).prepare_command(
+            command, cwd=cwd, env=process_values
+        )
+        options = ["--name", self.container_name]
+        for key, value in explicit_env.items():
+            if key in INLINE_CONTAINER_ENV:
+                options.extend(("--env", f"{key}={value}"))
+        argv[2:2] = options
+        return argv, host_cwd, process_env
+
+    def stop(self) -> None:
+        """Remove this attempt's container, including any running child tools."""
+        subprocess.run(
+            # Podman otherwise waits its default ten-second stop grace period,
+            # colliding with this cleanup timeout and delaying budget enforcement.
+            [self.podman_executable, "rm", "--force", "--time", "0", self.container_name],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+
+
 class HarnessSolver(BaseSolver):
     """Run one isolated harness session for each problem/run pair."""
 
@@ -335,6 +432,8 @@ class HarnessSolver(BaseSolver):
         default_prompt_template,
         default_api_client_args,
         last_chance_prompt,
+        *,
+        container_runtime: str = "docker",
     ):
         super().__init__(
             solver_config,
@@ -343,6 +442,7 @@ class HarnessSolver(BaseSolver):
             last_chance_prompt,
         )
         self.config = default_api_client_args.copy()
+        self.pricing = TokenPricing.from_config(self.config)
         self.harness = str(self.config["harness"])
         self.harness_key = self.harness.lower().replace("_", "-")
         raw_harness_version = self.config.get("harness_version", "latest")
@@ -353,6 +453,10 @@ class HarnessSolver(BaseSolver):
         if not isinstance(raw_harness_config, dict):
             raise TypeError("harness_config must be a mapping")
         self.harness_config = raw_harness_config.copy()
+        self.harness_config.pop("container_runtime", None)
+        self.container_runtime = validate_container_runtime(container_runtime)
+        if not isinstance(self.harness_config.get("direct_network", False), bool):
+            raise TypeError("harness_config.direct_network must be a boolean")
         allow_harness = self.config.get("allow_harness", True)
         requested_tools = self.harness_config.get("tools_enabled", True)
         if not isinstance(allow_harness, bool) or not isinstance(requested_tools, bool):
@@ -382,11 +486,12 @@ class HarnessSolver(BaseSolver):
         self.run_check_after_harness = bool(
             self.harness_config.get("run_check_after_harness", self.is_lean_comp)
         )
-        if self.harness_key not in HARNESS_RELEASES and not self.harness_config.get(
-            "docker_image"
+        if self.harness_key not in HARNESS_RELEASES and not (
+            self.harness_config.get("container_image")
+            or self.harness_config.get("docker_image")
         ):
             raise ValueError(
-                "Unrecognized harnesses must set harness_config.docker_image and provide "
+                "Unrecognized harnesses must set harness_config.container_image and provide "
                 "their executable in that image."
             )
         self.manage_harness_cli = bool(self.harness_config.get("managed_cli", True))
@@ -428,6 +533,14 @@ class HarnessSolver(BaseSolver):
         self.container_userns = self.harness_config.get("userns") or os.environ.get(
             "MATHARENA_CONTAINER_USERNS"
         )
+        if (
+            not self.container_userns
+            and self.container_runtime == "podman"
+            and os.getuid() != 0
+        ):
+            # Native rootless Podman otherwise maps the host user to container
+            # root, making --user UID:GID unable to write the host workspace.
+            self.container_userns = "keep-id"
         self.package_names = _package_names(self.host_lean_project)
         self.toolchain_dir = str(
             self.harness_config.get("lean_toolchain_dir")
@@ -444,7 +557,9 @@ class HarnessSolver(BaseSolver):
                 f"{self.toolchain_dir!r}. Use a version-matched image/toolchain."
             )
         self._response_agents: dict[int, Agent] = {}
-        self._response_budgets: dict[int, tuple[RunBudget, DockerHarnessSandbox]] = {}
+        self._response_budgets: dict[
+            int, tuple[RunBudget, DockerHarnessSandbox | PodmanHarnessSandbox]
+        ] = {}
 
     def _prepare_harness_cli(self) -> InstalledCLI | None:
         """Resolve one CLI version before workers start and reuse its read-only cache."""
@@ -530,6 +645,8 @@ class HarnessSolver(BaseSolver):
 
     @override
     def last_chance(self, previous_response: SolverResponse) -> SolverResponse:
+        if previous_response.detailed_cost.get("refusal_category") == "reasoning_extraction":
+            return previous_response
         agent = self._response_agents.get(id(previous_response))
         if agent is None:
             return previous_response
@@ -544,19 +661,26 @@ class HarnessSolver(BaseSolver):
             self._run_with_budget(
                 agent, sandbox, budget, self.last_chance_prompt, resume=True
             )
-            if budget
+            if budget and budget.has_limits
             else agent.resume(self.last_chance_prompt, session_id=agent.session_id)
         )
         elapsed_s = time.monotonic() - started
         additions = [{"role": "user", "content": self.last_chance_prompt}]
-        additions.extend(_events_to_messages(events))
+        additions.extend(_events_to_messages(events, harness=self.harness_key))
+        refusal = _has_reasoning_extraction_refusal(events)
+        if refusal:
+            _append_refusal_message(additions)
         previous_response.conversation.extend(additions)
         detailed_cost = (
-            self._detailed_cost(agent, usage=budget.usage(agent.get_tokens()))
+            self._detailed_cost(agent, usage=budget.usage(agent.get_tokens()), budget=budget)
             if budget
             else self._detailed_cost(agent)
         )
-        if budget:
+        detailed_cost["n_retries"] = (
+            previous_response.detailed_cost.get("n_retries", 0)
+            + _count_harness_retries(events)
+        )
+        if budget and budget.has_limits:
             detailed_cost["run_limits"] = budget.metadata()
             if budget.exceeded() and not _ends_with_response(
                 previous_response.conversation,
@@ -569,6 +693,8 @@ class HarnessSolver(BaseSolver):
             previous = previous_response.detailed_cost.get(key)
             # Do not misreport a partial duration as the total of an untimed run.
             detailed_cost[key] = previous + elapsed_s if previous is not None else None
+        if refusal:
+            detailed_cost["refusal_category"] = "reasoning_extraction"
         previous_response.detailed_cost = detailed_cost
         previous_response.history.append(
             {
@@ -610,7 +736,7 @@ class HarnessSolver(BaseSolver):
         if any(
             self.harness_config.get(key) is not None
             for key in ("max_time_seconds", "max_cost_usd")
-        ):
+        ) or self.pricing.threshold is not None:
             budget = RunBudget(
                 self.harness_config,
                 lambda usage: self._detailed_cost(None, usage=usage)["cost"],
@@ -618,6 +744,9 @@ class HarnessSolver(BaseSolver):
                     self.config.get(key) is not None
                     for key in ("read_cost", "write_cost")
                 ),
+                request_level_cost=self.pricing.threshold is not None,
+                base_cost_for_usage=lambda usage: self._detailed_cost(None, usage=usage, base_only=True)["cost"],
+                native_usage_reader=NativeUsageReader(workspace, self.harness_key),
             )
             fields = (
                 dict(payload)
@@ -638,7 +767,7 @@ class HarnessSolver(BaseSolver):
             model=model,
             env=sandbox,
             dir=workspace,
-            subagents={},
+            subagents=self.harness_config.get("subagents", {}),
             executable=self._agent_executable(),
             # Managed binaries have already been version-checked before they
             # are mounted. Agent sees a harmless host placeholder which the
@@ -659,7 +788,7 @@ class HarnessSolver(BaseSolver):
             )
             if budget
             else None,
-            should_stop=budget.exceeded if budget else None,
+            should_stop=budget.exceeded if budget and budget.has_limits else None,
             auto_wait=bool(self.harness_config.get("auto_wait", True)),
             auto_fallback=bool(self.harness_config.get("auto_fallback", True)),
             rate_limit_timeout=self.harness_config.get("rate_limit_timeout"),
@@ -667,29 +796,30 @@ class HarnessSolver(BaseSolver):
                 self.harness_config.get("rate_limit_poll_interval", 30)
             ),
             max_recovery_attempts=int(
-                self.harness_config.get("max_recovery_attempts", 3)
+                self.harness_config.get("max_recovery_attempts", 10)
             ),
         )
         logger.info(
             f"Starting {self.harness} harness run for P{problem_idx} r{run_idx} "
-            f"(tools_enabled={self.tools_enabled}) in {workspace}"
+            f"(container_runtime={self.container_runtime}, tools_enabled={self.tools_enabled}) in {workspace}"
         )
         started = time.monotonic()
         events = (
             self._run_with_budget(agent, sandbox, budget, prompt)
-            if budget
+            if budget and budget.has_limits
             else agent.run(prompt)
         )
         elapsed_s = time.monotonic() - started
         final_result = next((event for event in reversed(events) if event.type == "result"), None)
         # An explicit empty completion must not trigger a final-answer reprompt.
         # Lean runs still submit Solution.lean, regardless of the final chat text.
+        refusal = _has_reasoning_extraction_refusal(events)
         empty_completion = (
-            final_result is not None
+            not refusal and final_result is not None
             and not str(final_result.content or "").strip()
         )
         check_result = None
-        if self.run_check_after_harness and not (budget and budget.exceeded()):
+        if self.run_check_after_harness and not refusal and not (budget and budget.exceeded()):
             check_result = sandbox.run(
                 ["./check.sh"],
                 env=self._agent_environment(),
@@ -700,19 +830,21 @@ class HarnessSolver(BaseSolver):
 
         conversation = [
             {"role": "user", "content": prompt},
-            *_events_to_messages(events),
+            *_events_to_messages(events, harness=self.harness_key),
         ]
         if empty_completion and not _ends_with_response(conversation, ""):
             conversation.append({"role": "assistant", "type": "response", "content": ""})
         solution_text = (
             _read_text(workspace / "Solution.lean") if self.is_lean_comp else ""
         )
-        if solution_text.strip():
+        if solution_text.strip() and not refusal:
             final_content = f"```lean\n{solution_text.rstrip()}\n```"
             if not _ends_with_response(conversation, final_content):
                 conversation.append(
                     {"role": "assistant", "type": "response", "content": final_content}
                 )
+        if refusal:
+            _append_refusal_message(conversation)
         last_message = conversation[-1]
         if not (
             last_message.get("role") == "assistant"
@@ -742,6 +874,7 @@ class HarnessSolver(BaseSolver):
                 "elapsed_s": elapsed_s,
                 "messages": conversation,
                 "harness": self.harness,
+                "container_runtime": self.container_runtime,
                 "tools_enabled": self.tools_enabled,
                 "harness_version": (
                     self._harness_cli.release.version
@@ -759,17 +892,20 @@ class HarnessSolver(BaseSolver):
             }
         ]
         detailed_cost = (
-            self._detailed_cost(agent, usage=budget.usage(agent.get_tokens()))
+            self._detailed_cost(agent, usage=budget.usage(agent.get_tokens()), budget=budget)
             if budget
             else self._detailed_cost(agent)
         )
-        if budget:
+        detailed_cost["n_retries"] = _count_harness_retries(events)
+        if budget and budget.has_limits:
             detailed_cost["run_limits"] = budget.metadata()
         detailed_cost.update(time=elapsed_s, request_time=elapsed_s)
+        if refusal:
+            detailed_cost["refusal_category"] = "reasoning_extraction"
         response = SolverResponse(
             batch_idx, conversation, detailed_cost, history=history
         )
-        if not empty_completion:
+        if not empty_completion and not refusal:
             self._response_agents[id(response)] = agent
             if budget:
                 self._response_budgets[id(response)] = (budget, sandbox)
@@ -781,6 +917,8 @@ class HarnessSolver(BaseSolver):
         events = self._stream_with_budget(agent, sandbox, budget, prompt, resume=resume)
         # A CLI can report its usage only as it exits, before the watcher sees it.
         budget.exceeded()
+        if _has_reasoning_extraction_refusal(events):
+            return events
         grace_prompt = (
             budget.begin_cost_grace() if agent.session_id is not None else None
         )
@@ -795,10 +933,11 @@ class HarnessSolver(BaseSolver):
                 agent, sandbox, budget, grace_prompt, resume=True
             )
             events.extend(final_events)
-            messages = _events_to_messages(final_events)
+            messages = _events_to_messages(final_events, harness=self.harness_key)
             final_text = messages[-1].get("content", "") if messages else ""
             budget.finish_cost_grace(
-                isinstance(final_text, str)
+                not _has_reasoning_extraction_refusal(final_events)
+                and isinstance(final_text, str)
                 and bool(final_text.strip())
                 and _ends_with_response(messages, final_text)
             )
@@ -897,6 +1036,11 @@ class HarnessSolver(BaseSolver):
             if formal.strip()
             else "import Mathlib\n\n"
         )
+        if self.config.get("lean_task") == "prove_or_disprove":
+            from matharena.lean_conjecture import target_statement
+
+            # A neutral template, not a gold label; the solver may choose either branch.
+            initial_solution = target_statement(formal, "prove")
         solution_path = workspace / "Solution.lean"
         if not solution_path.exists() or self.harness_config.get(
             "overwrite_solution", True
@@ -979,9 +1123,16 @@ class HarnessSolver(BaseSolver):
             "qwen-code",
             "open-code",
             "opencode",
+            "grok",
+            "grok-build",
+            "grok-cli",
             "deepcode",
             "deepcode-cli",
             "deep-code",
+            "vibe",
+            "vibe-cli",
+            "mistral-vibe",
+            "mistral",
         }:
             raise ValueError(f"{self.harness} currently supports API-credit auth only")
         if auth in {"chatgpt", "oauth", "subscription"}:
@@ -1043,6 +1194,7 @@ class HarnessSolver(BaseSolver):
             "harness_config",
             "allow_harness",
             "is_lean_comp",
+            "lean_task",
             "lean_environment",
             "max_tool_calls",
             "lean_environment_override",
@@ -1050,6 +1202,10 @@ class HarnessSolver(BaseSolver):
             "tools",
         ):
             api_args.pop(key, None)
+        # Harnesses execute interactive calls; batch settings belong to the API solver.
+        api_args["batch_processing"] = False
+        api_args.pop("batch_max_tokens", None)
+        api_args.pop("anthropic_betas", None)
         requested_api = str(api_args.get("api") or "openai").lower()
         client = APIClient(**api_args)
         antigravity_harness = self.harness_key in {
@@ -1131,20 +1287,34 @@ class HarnessSolver(BaseSolver):
             raise ValueError(
                 f"Harnesses require an OpenAI- or Anthropic-compatible endpoint, got {client.api!r}"
             )
+        openrouter_claude = requested_api == "openrouter" and self.harness_key in {
+            "claude", "claude-code", "anthropic"
+        }
         base_url = client.base_url or (
             "https://api.openai.com/v1"
             if protocol == "openai"
             else "https://api.anthropic.com"
         )
+        if openrouter_claude:
+            # Claude Code speaks Messages, not Chat Completions, through this gateway.
+            protocol = "anthropic"
+            base_url = "https://openrouter.ai/api"
         upstream_headers = dict(client.default_headers or {})
-        auth_header = "Authorization" if protocol == "openai" else "x-api-key"
+        bearer_auth = protocol == "openai" or openrouter_claude
+        auth_header = "Authorization" if bearer_auth else "x-api-key"
         if not any(name.lower() == auth_header.lower() for name in upstream_headers):
             upstream_headers[auth_header] = (
                 f"Bearer {client.api_key}"
-                if protocol == "openai"
+                if bearer_auth
                 else str(client.api_key)
             )
         request_overrides: dict[str, object] = {}
+        if openrouter_claude:
+            # Preserve routing/caching; the CLI supplies native thinking and effort.
+            extra_body = client.kwargs.get("extra_body", {})
+            if not isinstance(extra_body, Mapping):
+                raise TypeError("API extra_body must be a mapping")
+            request_overrides.update(extra_body)
         if self.harness.lower().replace("_", "-") in {
             "kimi",
             "kimi-code",
@@ -1157,6 +1327,10 @@ class HarnessSolver(BaseSolver):
             "deepcode",
             "deepcode-cli",
             "deep-code",
+            "vibe",
+            "vibe-cli",
+            "mistral-vibe",
+            "mistral",
         }:
             # These CLIs own the Chat Completions request body. Preserve the
             # parameters that the normal MathArena API client would send.
@@ -1168,8 +1342,8 @@ class HarnessSolver(BaseSolver):
                 if not isinstance(extra_body, Mapping):
                     raise TypeError("API extra_body must be a mapping")
                 request_overrides.update(extra_body)
-        if self.harness_key in {"muse", "muse-code", "muse-cli"}:
-            # Muse uses Responses, while APIClient.kwargs are Chat Completions-shaped.
+        if self.harness_key in {"muse", "muse-code", "muse-cli", "grok", "grok-build", "grok-cli"}:
+            # These native backends use Responses even when an API config uses Chat Completions.
             request_overrides.update(client.kwargs)
             for field in ("max_tokens", "max_completion_tokens"):
                 if field in request_overrides:
@@ -1179,6 +1353,12 @@ class HarnessSolver(BaseSolver):
             effort = request_overrides.pop("reasoning_effort", reasoning)
             if effort is not None:
                 request_overrides["reasoning"] = {"effort": effort}
+        if self.harness_key in {"grok", "grok-build", "grok-cli"}:
+            extra_body = request_overrides.pop("extra_body", None)
+            if extra_body is not None:
+                if not isinstance(extra_body, Mapping):
+                    raise TypeError("API extra_body must be a mapping")
+                request_overrides.update(extra_body)
         explicit_overrides = self.harness_config.get("request_overrides", {})
         if not isinstance(explicit_overrides, Mapping):
             raise TypeError("harness_config.request_overrides must be a mapping")
@@ -1205,9 +1385,13 @@ class HarnessSolver(BaseSolver):
             reasoning=reasoning,
         )
 
-    def _build_sandbox(self, workspace: Path) -> DockerHarnessSandbox:
+    def _build_sandbox(
+        self, workspace: Path
+    ) -> DockerHarnessSandbox | PodmanHarnessSandbox:
         image = str(
-            self.harness_config.get("docker_image") or DEFAULT_HARNESS_DOCKER_IMAGE
+            self.harness_config.get("container_image")
+            or self.harness_config.get("docker_image")
+            or DEFAULT_HARNESS_DOCKER_IMAGE
         )
         mounts: list[SandboxMount] = []
         if self._harness_cli is not None:
@@ -1265,7 +1449,10 @@ class HarnessSolver(BaseSolver):
                 )
             )
         extra_args.extend(
-            str(value) for value in self.harness_config.get("docker_extra_args", ())
+            str(value)
+            for value in self.harness_config.get(
+                "container_extra_args", self.harness_config.get("docker_extra_args", ())
+            )
         )
         if self._harness_cli is not None:
             executable: str | PurePosixPath | None = (
@@ -1277,7 +1464,12 @@ class HarnessSolver(BaseSolver):
             executable = self.harness_config.get(
                 "container_executable"
             ) or HARNESS_EXECUTABLES.get(self.harness_key)
-        return DockerHarnessSandbox(
+        sandbox_class = (
+            PodmanHarnessSandbox
+            if self.container_runtime == "podman"
+            else DockerHarnessSandbox
+        )
+        return sandbox_class(
             root=workspace,
             network_enabled=bool(self.harness_config.get("direct_network", False)),
             image=image,
@@ -1316,26 +1508,26 @@ class HarnessSolver(BaseSolver):
         )
         return environment
 
-    def _detailed_cost(self, agent: Agent | None, *, usage=None) -> dict[str, Any]:
+    def _detailed_cost(self, agent: Agent | None, *, usage=None, budget=None, base_only=False) -> dict[str, Any]:
         if usage is None:
             usage = agent.get_tokens()
         cached = usage.cache_read_tokens
         if self.harness.lower() in {"claude", "claude-code", "anthropic"}:
-            fresh = usage.input_tokens
-            total_input = fresh + cached
+            total_input = usage.input_tokens + cached
         else:
             total_input = usage.input_tokens
-            fresh = max(0, total_input - cached)
-        cost = (
-            fresh * float(self.config.get("read_cost") or 0)
-            + cached
-            * float(
-                self.config.get("cache_read_cost", self.config.get("read_cost", 0)) or 0
+        pricing_input = total_input
+        if self.pricing.threshold is not None and self.harness_key in {"codex", "codex-cli", "openai-codex"}:
+            # Codex/OpenAI include cache writes in input_tokens; Anthropic
+            # reports them separately. The calculator accepts disjoint counts.
+            pricing_input = max(0, pricing_input - usage.cache_write_tokens)
+        if budget and budget.request_level_cost:
+            cost = budget.cost(usage)
+        else:
+            cost = self.pricing.cost(
+                pricing_input, usage.output_tokens, cached, usage.cache_write_tokens, base_only=base_only,
             )
-            + usage.cache_write_tokens * float(self.config.get("cache_write_cost") or 0)
-            + usage.output_tokens * float(self.config.get("write_cost") or 0)
-        ) / 1_000_000
-        return {
+        result = {
             "cost": cost,
             "input_tokens": total_input,
             "cached_input_tokens": cached,
@@ -1348,6 +1540,9 @@ class HarnessSolver(BaseSolver):
             "model": self.config.get("model"),
             "n_retries": 0,
         }
+        if budget and budget.request_level_cost and budget.cost_estimated:
+            result["long_context_cost_estimated"] = True
+        return result
 
 
 def _gemini_thinking_config(config: Mapping[str, Any]) -> dict[str, object] | None:
@@ -1393,9 +1588,63 @@ def _reasoning_effort(config: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _events_to_messages(events: Sequence[AgentEvent]) -> list[dict[str, Any]]:
-    messages: list[dict[str, Any]] = []
+def _coalesce_grok_events(events: Sequence[AgentEvent]) -> Iterator[AgentEvent]:
+    """Join native Grok deltas without changing the raw event history.
+
+    Reasoning and visible text remain separate blocks. Tool interactions, user
+    messages, and recovery/session boundaries end a block; usage and tool-status
+    notifications do not split an otherwise continuous stream.
+    """
+    first: AgentEvent | None = None
+    parts: list[str] = []
+
+    def block() -> AgentEvent:
+        assert first is not None
+        return AgentEvent(
+            type="message" if first.type == "text" else "reasoning",
+            content="".join(parts),
+            role="assistant",
+            session_id=first.session_id,
+            timestamp=first.timestamp,
+        )
+
     for event in events:
+        if event.type in {"usage", "event"}:
+            # These events were never conversation messages. Keep them in the
+            # original history, rather than splitting an assistant's text.
+            continue
+        if event.type in {"text", "reasoning"}:
+            content = str(event.content or "")
+            if not content:
+                continue
+            if first is not None and first.type != event.type:
+                yield block()
+                first, parts = None, []
+            if first is None:
+                first = event
+            parts.append(content)
+            continue
+        if first is not None:
+            yield block()
+            first, parts = None, []
+        yield event
+    if first is not None:
+        yield block()
+
+
+def _events_to_messages(
+    events: Sequence[AgentEvent], *, harness: str | None = None
+) -> list[dict[str, Any]]:
+    # Other harnesses can emit both text deltas and complete message snapshots.
+    # Only Grok's deltas are authoritative here; treating all harnesses alike
+    # would duplicate their assistant responses.
+    normalized_events = (
+        _coalesce_grok_events(events)
+        if (harness or "").lower().replace("_", "-") in {"grok", "grok-build", "grok-cli"}
+        else iter(events)
+    )
+    messages: list[dict[str, Any]] = []
+    for event in normalized_events:
         if event.type == "message" and event.role == "user":
             messages.append({"role": "user", "content": str(event.content or "")})
         elif event.type == "message" and event.role in {None, "assistant"}:
@@ -1494,4 +1743,4 @@ def _lean_environment(
     }
 
 
-__all__ = ["DockerHarnessSandbox", "HarnessSolver"]
+__all__ = ["DockerHarnessSandbox", "PodmanHarnessSandbox", "HarnessSolver"]

@@ -31,6 +31,7 @@ _LOCAL_TOOLS = (
     "grep_search",
     "run_command",
 )
+_WEB_TOOLS = ("search_web", "read_url_content", "view_content_chunk", "browser_subagent")
 _AGENT_PROMPT = """Use only the local file and shell tools listed for this agent.
 The writable project directory is /work. You have no internet access.
 Do not invoke subagents, plugins, skills, MCP servers, or remote-search tools.
@@ -88,19 +89,24 @@ class AntigravityCLIAgent(Agent):
             "altScreenMode": "never",
             "allowNonWorkspaceAccess": self._container_auto_approve,
         }
+        if self.model.model == "gemini-4-argon" and self.model.auth_mode == "api":
+            # The API-key catalog in agy 1.3.5 omits Argon.
+            values["customModelsConfig"] = {
+                "customModels": {
+                    "gemini-4-argon": {"modelName": "gemini-4-argon"}
+                }
+            }
         if self.minimal_context:
             values["permissions"] = {
                 "allow": [
                     "command(*)",
-                    "read_file(/work/)",
-                    "write_file(/work/)",
+                    f"read_file({getattr(self.env, 'container_root', '/work')}/)",
+                    f"write_file({getattr(self.env, 'container_root', '/work')}/)",
                 ],
-                "deny": [
-                    "read_url(*)",
-                    "execute_url(*)",
-                    "mcp(*)",
-                ],
+                "deny": ([] if self.internet_enabled else ["read_url(*)", "execute_url(*)"]) + ["mcp(*)"],
             }
+            if self.internet_enabled:
+                values["permissions"]["allow"].extend(["read_url(*)", "execute_url(*)"])
         settings.write_text(
             json.dumps(values, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
@@ -109,11 +115,12 @@ class AntigravityCLIAgent(Agent):
             return
         agent_file = home / ".gemini" / "config" / "agents" / _AGENT_NAME / "agent.md"
         agent_file.parent.mkdir(parents=True, exist_ok=True)
-        tools = "\n".join(f"  - {name}" for name in _LOCAL_TOOLS)
+        tool_names = _LOCAL_TOOLS + (_WEB_TOOLS if self.internet_enabled else ())
+        tools = "\n".join(f"  - {name}" for name in tool_names)
         agent_file.write_text(
             "---\n"
             f"name: {_AGENT_NAME}\n"
-            "description: Minimal local MathArena coding agent.\n"
+            "description: Minimal MathArena coding agent.\n"
             "tools:\n"
             f"{tools}\n"
             "mainAgent: true\n"
@@ -124,9 +131,15 @@ class AntigravityCLIAgent(Agent):
             "skills: []\n"
             "plugins: []\n"
             "---\n\n"
-            f"{_AGENT_PROMPT}",
+            + self.network_instructions(_AGENT_PROMPT),
             encoding="utf-8",
         )
+
+    @property
+    def _offline_models(self) -> frozenset[str]:
+        models = super()._offline_models
+        # The pinned CLI uses Flash Lite for housekeeping before its solver turn.
+        return models | {"gemini-3.1-flash-lite-preview"} if models else models
 
     def model_environment(self) -> dict[str, str]:
         self._runtime_paths()
@@ -221,6 +234,7 @@ class AntigravityCLIAgent(Agent):
                 listen_host=route.listen_host,
                 client_host=route.client_host,
                 allow_remote_clients=route.allow_remote_clients,
+                offline_models=self._offline_models,
                 unix_socket=route.unix_socket,
                 client_port=route.client_port,
             ) as proxy,
@@ -239,65 +253,80 @@ class AntigravityCLIAgent(Agent):
         if prior_session:
             after_step = last_native_step(self.root, prior_session)
         terminal = None
-        errors = []
+        failure = None
         response_parts = []
-        for event in super()._stream_once(message, resume=resume, session_id=session_id, last=last):
-            if event.type == "result":
-                terminal = event
-                continue
-            if event.type == "error":
-                errors.append(event)
-            if event.type == "message" and event.role in (None, "assistant"):
-                response_parts.append(str(event.content or ""))
-            elif event.type in {"tool_call", "tool_result", "reasoning"}:
-                response_parts.clear()
-            yield event
+        try:
+            for event in super()._stream_once(message, resume=resume, session_id=session_id, last=last):
+                if event.type == "result":
+                    terminal = event
+                    continue
+                if event.type == "message" and event.role in (None, "assistant"):
+                    response_parts.append(str(event.content or ""))
+                elif event.type in {"tool_call", "tool_result", "reasoning"}:
+                    response_parts.clear()
+                yield event
+        except CLIProcessError as error:
+            # agy can retain an earlier error after completing a newer answer.
+            # Check the native terminal step before allowing the recovery loop
+            # to send another continuation prompt.
+            failure = error
         command = self.build_command(message, resume=resume, session_id=session_id, last=last)
-        if errors:
-            raise CLIProcessError(command, 1, "Antigravity reported a terminal error")
         if terminal is None:
-            raise IncompleteAntigravityResponse(
+            failure = failure or IncompleteAntigravityResponse(
                 command, 1, "Antigravity exited without a terminal result"
             )
-        native_payload = terminal.raw.get("result", {})
+        native_payload = terminal.raw.get("result", {}) if terminal else {}
         if native_payload.get("denied_actions"):
             raise IncompleteAntigravityResponse(
                 command,
                 1,
                 "Antigravity stopped after a permission denial without completing the task",
             )
-        content = terminal.content or "".join(response_parts)
+        if terminal and str(native_payload.get("status", "")).upper() != "SUCCESS":
+            failure = failure or CLIProcessError(
+                command, 1, str(native_payload.get("error") or "Antigravity reported a terminal error")
+            )
+        content = (terminal.content if terminal else None) or "".join(response_parts)
         recovered = None
-        native_session = terminal.session_id or self.session_id
+        native_session = (terminal.session_id if terminal else None) or self.session_id
         if native_session:
             try:
                 recovered = read_native_response(
                     self.root,
                     native_session,
                     after_step=after_step if native_session == prior_session else -1,
+                    require_quiescent=failure is not None,
                 )
             except (ValueError, OSError, sqlite3.Error) as error:
                 logger.warning("Cannot read native Antigravity response: {}", type(error).__name__)
-            # The CLI result can combine the main answer and later background-task
-            # follow-ups. The native database contains only the last message; do
-            # not replace a complete aggregate with that message alone.
-            if recovered is not None and content.rstrip().endswith(recovered.text.rstrip()):
-                recovered = None
-            if recovered is not None:
+        if failure and (recovered is None or (resume and prior_session is None)):
+            raise failure
+        # The CLI result can combine the main answer and later background-task
+        # follow-ups. Keep that aggregate when its native tail is complete.
+        if recovered is not None:
+            if not isinstance(content, str) or not content.rstrip().endswith(recovered.text.rstrip()):
                 content = recovered.text
+            elif failure is None:
+                recovered = None
         if not isinstance(content, str) or not content.strip():
             raise IncompleteAntigravityResponse(
                 command,
                 1,
                 "Antigravity reported SUCCESS but no final answer was captured or saved natively",
             )
-        raw = dict(terminal.raw)
+        raw = dict(terminal.raw) if terminal else {}
+        if failure is not None:
+            raw["cli_error"] = {"returncode": failure.returncode, "stderr": failure.stderr}
+            logger.warning(
+                "Accepting fresh native Antigravity answer after CLI error; skipping resume: {}",
+                failure,
+            )
         if recovered is not None:
             raw["native_response"] = {
                 "step_index": recovered.step_index,
                 "source": "session_database",
             }
-            if not terminal.content:
+            if terminal is None or not terminal.content:
                 logger.info(
                     "Recovered Antigravity final response from native session step {}",
                     recovered.step_index,
@@ -465,9 +494,9 @@ class AntigravityCLIAgent(Agent):
                 result.append(make("usage", normalized_usage))
             if str(payload.get("status", "")).upper() != "SUCCESS":
                 result.append(make("error", payload.get("error", payload)))
-            else:
-                # Keep the canonical answer; streamed deltas may be incomplete.
-                result.append(make("result", payload.get("response")))
+            # Keep error envelopes too: native validation may recover their
+            # fresh answer, and permission denials must remain visible.
+            result.append(make("result", payload.get("response")))
             return result
         if native_type == "error":
             return [make("error", payload.get("message", payload))]

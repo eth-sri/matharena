@@ -2,8 +2,6 @@ model: muse-spark-1.3
 api: meta
 harness: muse
 harness_version: "1.0.3-R2198.1"
-harness_config:
-  max_recovery_attempts: 3
 concurrent_requests: 12
 use_openai_responses_api: true
 use_openai_responses_api_tools: false

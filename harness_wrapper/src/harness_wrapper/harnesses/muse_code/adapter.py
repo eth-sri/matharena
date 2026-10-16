@@ -25,6 +25,7 @@ from ...tools import CLIInstallation, CLIProcessError
 _LOCAL_TOOLS = frozenset(
     {"bash", "bash_input", "read_file", "search", "write_file", "edit_file", "write_todos"}
 )
+_WEB_TOOLS = frozenset({"web_search", "web_search_preview", "web_fetch", "server_web_fetch"})
 _MINIMAL_PROMPT = (
     "Solve the user's task using mathematical reasoning and, when useful, the available "
     "local file and shell tools. There is no internet access. Do not use web search, "
@@ -42,6 +43,8 @@ def _select_tools(tools: list[Any], names: frozenset[str]) -> list[dict[str, Any
             if children:
                 kept.append({**tool, "tools": children})
         elif tool.get("type") == "function" and tool.get("name") in names:
+            kept.append(tool)
+        elif tool.get("type") in _WEB_TOOLS and tool["type"] in names:
             kept.append(tool)
     return kept
 
@@ -132,7 +135,9 @@ class MuseCodeAgent(Agent):
         if reasoning is not None:
             command.extend(("--reasoning-effort", str(reasoning)))
         if self.minimal_context:
-            command.extend(("--disable-web-tools", "--no-foreign-personal-context"))
+            command.append("--no-foreign-personal-context")
+            if not self.internet_enabled:
+                command.append("--disable-web-tools")
         if self.env is not None and getattr(self.env, "enabled", False):
             # Docker/Podman supplies the outer filesystem and network boundary.
             command.extend(("--disable-approval", "--disable-sandbox"))
@@ -165,8 +170,9 @@ class MuseCodeAgent(Agent):
             # external tool. Never expose the solver's tool set in this request.
             payload["tools"] = summary_tools
         elif self.minimal_context:
-            payload["tools"] = _select_tools(payload.get("tools", []), _LOCAL_TOOLS)
-            payload["instructions"] = _MINIMAL_PROMPT
+            tools = _LOCAL_TOOLS | (_WEB_TOOLS if self.internet_enabled else frozenset())
+            payload["tools"] = _select_tools(payload.get("tools", []), tools)
+            payload["instructions"] = self.network_instructions(_MINIMAL_PROMPT)
 
     def _resume_model_catalog(self) -> dict[str, Any]:
         # Unlike exec with an explicit model, serve needs a catalog entry to
@@ -444,6 +450,7 @@ class MuseCodeAgent(Agent):
                 listen_host=route.listen_host,
                 client_host=route.client_host,
                 allow_remote_clients=route.allow_remote_clients,
+                offline_models=self._offline_models,
                 unix_socket=route.unix_socket,
                 client_port=route.client_port,
             ) as proxy,

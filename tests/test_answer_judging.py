@@ -31,21 +31,21 @@ def judge_config():
     return config
 
 
-def write_answer_dataset(path):
-    (path / "problems").mkdir(parents=True)
-    answers = {1: r"\frac{1}{2}", 2: "001", 3: "1,2"}
-    with (path / "answers.csv").open("w", newline="") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(["id", "answer"])
-        for problem_id, answer in answers.items():
-            writer.writerow([problem_id, answer])
-            (path / "problems" / f"{problem_id}.tex").write_text("A synthetic test question.")
-    return path
+def write_answer_fixture(directory, n=1):
+    (directory / "problems").mkdir(parents=True)
+    with (directory / "answers.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["id", "answer"])
+        writer.writeheader()
+        for index in range(1, n + 1):
+            writer.writerow({"id": index, "answer": rf"\frac{{{index}}}{{2}}"})
+            (directory / "problems" / f"{index}.tex").write_text(f"What is {index} divided by two?")
+    return directory
 
 
 def make_runner(tmp_path, monkeypatch):
     config = yaml.safe_load((ROOT / "configs/competitions/arxiv/august.yaml").read_text())
-    config["dataset_path"] = str(write_answer_dataset(tmp_path / "dataset"))
+    # Keep this lifecycle test offline and independent of published benchmark data.
+    config["dataset_path"] = str(write_answer_fixture(tmp_path / "data"))
     comp_dir = tmp_path / "competitions/arxiv"
     comp_dir.mkdir(parents=True)
     (comp_dir / "august.yaml").write_text(yaml.safe_dump(config))
@@ -107,7 +107,7 @@ def test_answer_judge_prompt_preserves_literal_latex_braces(monkeypatch):
 
 
 def test_answer_references_are_loaded_as_text(tmp_path):
-    dataset = write_answer_dataset(tmp_path / "dataset")
+    dataset = write_answer_fixture(tmp_path / "data", n=3)
     grading_map = JUDGE.load_grading_map(str(dataset), answer_judging=True)
     with (dataset / "answers.csv").open(newline="") as handle:
         rows = list(csv.DictReader(handle))

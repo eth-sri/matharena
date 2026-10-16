@@ -11,6 +11,7 @@ from harness_wrapper.models.oauth.openai_bridge import pace_codex_connections
 import yaml
 
 from matharena.json_zst import dump_json_zst, load_json_zst
+from matharena.container_runtime import add_container_runtime_argument
 from matharena.solvers.judges import JudgePool
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -93,7 +94,7 @@ def collect_cases(comp, config, destination, models=None, problem_ids=None):
     return cases
 
 
-def run_comparison(cases, config):
+def run_comparison(cases, config, *, container_runtime="docker"):
     pending = [case for case in cases if case["candidate"] is None]
     if not pending:
         return
@@ -101,7 +102,7 @@ def run_comparison(cases, config):
         "guidelines": "", "ground_truth_solutions": [],
         "student_answer": case["prompt"], "original_problem_statement": "",
     }) for case in pending]
-    pool = JudgePool(solver_config=config)
+    pool = JudgePool(solver_config=config, container_runtime=container_runtime)
     for response in pool.solve_batch(
         queries,
         {i: case["problem"] for i, case in enumerate(pending)},
@@ -169,6 +170,7 @@ def main():
     parser.add_argument("--output-dir", type=Path, default=ROOT / "logs/judge_comparison/astra_low")
     parser.add_argument("--models", nargs="+", help="Optional evaluated-model filter.")
     parser.add_argument("--problem-ids", type=int, nargs="+", help="Optional problem filter, applied to both August benchmarks.")
+    add_container_runtime_argument(parser)
     args = parser.parse_args()
     destination = args.output_dir.resolve()
     if destination.is_relative_to((ROOT / "outputs").resolve()):
@@ -186,7 +188,7 @@ def main():
             # Scheduling only: keep saved configuration fingerprints valid for resume.
             with pace_codex_connections(2):
                 for cases, config in groups.values():
-                    run_comparison(cases, config)
+                    run_comparison(cases, config, container_runtime=args.container_runtime)
     finally:
         summary = write_report(groups, destination)
         print(json.dumps(summary, indent=2))

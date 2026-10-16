@@ -17,10 +17,11 @@ from matharena.utils import normalize_conversation
 DEFAULT_LEAN_ENVIRONMENT = "lean-4.31.0"
 LOOGLE_DIR_ENV = "MATHARENA_LOOGLE_DIR"
 REPO_ROOT = Path(__file__).resolve().parents[3]
-COMPARATOR_BIN = REPO_ROOT / "external" / "comparator" / ".lake" / "build" / "bin" / "comparator"
-LEAN4EXPORT_BIN = REPO_ROOT / "external" / "lean4export" / ".lake" / "build" / "bin" / "lean4export"
-LANDRUN_BIN = REPO_ROOT / "external" / "landrun" / "bin" / "landrun"
-COMPARATOR_PROJECT_DIR = REPO_ROOT / "external" / "comparator_project"
+LEAN_RUNTIME_ROOT = Path(os.environ.get("MATHARENA_LEAN_RUNTIME_ROOT", str(REPO_ROOT))).resolve()
+COMPARATOR_BIN = LEAN_RUNTIME_ROOT / "external" / "comparator" / ".lake" / "build" / "bin" / "comparator"
+LEAN4EXPORT_BIN = LEAN_RUNTIME_ROOT / "external" / "lean4export" / ".lake" / "build" / "bin" / "lean4export"
+LANDRUN_BIN = LEAN_RUNTIME_ROOT / "external" / "landrun" / "bin" / "landrun"
+COMPARATOR_PROJECT_DIR = LEAN_RUNTIME_ROOT / "external" / "comparator_project"
 COMPARATOR_LOCK = threading.Lock()
 COMPARATOR_AXIOMS = ["propext", "Quot.sound", "Classical.choice"]
 COMPARATOR_TIMEOUT_WARNING = "Comparator timed out; accepted based on Axle only."
@@ -332,7 +333,10 @@ def _extract_submission_blocks(model_output):
     return [prefix, theorem] if prefix else [theorem]
 
 
-def _run_comparator_check(model_output, formal_statement, messages=None):
+def _run_comparator_check(
+    model_output, formal_statement, messages=None, *, theorem_names=None,
+    exact_submission=False, environment=None,
+):
     required_paths = [
         COMPARATOR_BIN,
         LEAN4EXPORT_BIN,
@@ -349,16 +353,26 @@ def _run_comparator_check(model_output, formal_statement, messages=None):
         )
         return COMPARATOR_UNAVAILABLE_WARNING
 
-    formal_statement = _strip_lean_imports(formal_statement)
-    theorem_name_match = LEAN_DECL_NAME_RE.search(formal_statement)
-    if theorem_name_match is None:
-        return "Comparator could not extract the theorem name from the formal statement."
-
-    executed_prefix, theorem_block = get_executed_lean_submission_parts(
-        model_output, formal_statement=formal_statement, messages=messages
-    )
-    solution_code = "\n\n".join(block for block in [executed_prefix, theorem_block] if block.strip())
-    solution_code = _strip_lean_imports(solution_code)
+    if environment is not None:
+        toolchain = (COMPARATOR_PROJECT_DIR / "lean-toolchain").read_text().strip()
+        if toolchain != f"leanprover/lean4:v{environment.removeprefix('lean-')}":
+            return "Comparator environment does not match the competition's pinned Lean version."
+    if theorem_names is None:
+        theorem_name_match = LEAN_DECL_NAME_RE.search(formal_statement)
+        if theorem_name_match is None:
+            return "Comparator could not extract the theorem name from the formal statement."
+        theorem_names = [theorem_name_match.group(1)]
+    if exact_submission:
+        # Conjecture grading compares the submitted types without repairing headers
+        # or removing imports. The frozen challenge is compiled separately.
+        solution_code = model_output
+    else:
+        formal_statement = _strip_lean_imports(formal_statement)
+        executed_prefix, theorem_block = get_executed_lean_submission_parts(
+            model_output, formal_statement=formal_statement, messages=messages
+        )
+        solution_code = "\n\n".join(block for block in [executed_prefix, theorem_block] if block.strip())
+        solution_code = _strip_lean_imports(solution_code)
 
     with COMPARATOR_LOCK:
         with tempfile.TemporaryDirectory(prefix="matharena-comparator-") as tmpdir:
@@ -382,7 +396,7 @@ def _run_comparator_check(model_output, formal_statement, messages=None):
                     {
                         "challenge_module": "Challenge",
                         "solution_module": "Solution",
-                        "theorem_names": [theorem_name_match.group(1)],
+                        "theorem_names": theorem_names,
                         "permitted_axioms": COMPARATOR_AXIOMS,
                         "enable_nanoda": False,
                     }

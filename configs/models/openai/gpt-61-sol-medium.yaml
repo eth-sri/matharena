@@ -1,0 +1,28 @@
+human_readable_id: GPT-6.1 Sol (medium)
+date: "2026-09-29"
+other_params:
+  open: false
+  creator: OpenAI
+
+model: openai/gpt-6.1-sol
+api: openrouter
+harness: codex
+harness_version: "0.159.0"
+reasoning_effort: medium
+max_tokens: 128000
+concurrent_requests: 16
+# Uses OPENROUTER_API_KEY; standard OpenAI pricing per million tokens.
+# https://developers.openai.com/api/docs/models/gpt-6.1-sol
+read_cost: 2
+cache_read_cost: 0.1
+write_cost: 10
+
+harness_config:
+  auth: api
+  container_executable: codex
+  model_context_window: 1050000
+  request_overrides:
+    provider:
+      only: [openai]
+      allow_fallbacks: false
+    service_tier: default

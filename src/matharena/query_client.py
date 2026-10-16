@@ -11,7 +11,7 @@ from uuid import uuid4
 class HarnessQueryClient:
     """Adapt the shared HarnessSolver without duplicating its execution lifecycle."""
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], *, container_runtime: str = "docker"):
         from matharena.solvers.harness_solver import HarnessSolver
 
         config = config.copy()
@@ -24,7 +24,7 @@ class HarnessQueryClient:
             "workspace_root", str(log_root / "curation" / uuid4().hex / "p{problem_idx}_r{run_idx}")
         )
         config["harness_config"] = harness_config
-        self.solver = HarnessSolver({}, "{problem}", config, "")
+        self.solver = HarnessSolver({}, "{problem}", config, "", container_runtime=container_runtime)
         self.next_query_idx = 0
 
     def run_queries(self, queries):
@@ -52,13 +52,13 @@ class HarnessQueryClient:
             yield response.idx, response.conversation, cost
 
 
-def create_query_client(model_config: dict[str, Any]):
+def create_query_client(model_config: dict[str, Any], *, container_runtime: str = "docker"):
     config = model_config.copy()
     client_type = config.pop("type", "api")
     if client_type not in {"api", "pure_model"}:
         raise ValueError(f"Unsupported curation query client type: {client_type!r}")
     if config.get("harness"):
-        return HarnessQueryClient(config)
+        return HarnessQueryClient(config, container_runtime=container_runtime)
     config.pop("harness", None)
     config.pop("harness_version", None)
     config.pop("harness_config", None)

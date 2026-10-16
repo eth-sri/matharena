@@ -16,7 +16,8 @@ def query(text):
     return [{"role": "user", "content": text}]
 
 
-def test_curation_uses_normal_harness_and_preserves_batches_logs_and_failures(monkeypatch, tmp_path):
+@pytest.mark.parametrize("runtime", ["docker", "podman"])
+def test_curation_uses_normal_harness_and_preserves_batches_logs_and_failures(monkeypatch, tmp_path, runtime):
     monkeypatch.setenv("MATHARENA_REQUEST_LOG_DIR", str(tmp_path))
     config = load_model_config("configs/models/openai/gpt-6-astra.yaml")
     config["allow_harness"] = True
@@ -49,7 +50,8 @@ def test_curation_uses_normal_harness_and_preserves_batches_logs_and_failures(mo
     monkeypatch.setattr(HarnessSolver, "_agent_executable", lambda self: None)
     monkeypatch.setattr(HarnessSolver, "_agent_environment", lambda self: {})
     monkeypatch.setattr("matharena.solvers.harness_solver.Agent", FakeAgent)
-    client = create_query_client(config)
+    client = create_query_client(config, container_runtime=runtime)
+    assert client.solver.container_runtime == runtime
 
     assert isinstance(client, HarnessQueryClient)
     assert config == original
@@ -104,6 +106,6 @@ def test_ordinary_api_config_keeps_its_backend(monkeypatch):
 
     monkeypatch.setattr("matharena.api_client.APIClient", fake_api)
     config = {"model": "api-model", "api": "openai", "harness": False}
-    assert create_query_client(config) == "api-client"
+    assert create_query_client(config, container_runtime="podman") == "api-client"
     assert observed == {"model": "api-model", "api": "openai"}
     assert config["harness"] is False

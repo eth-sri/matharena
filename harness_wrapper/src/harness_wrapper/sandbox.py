@@ -593,8 +593,8 @@ class PodmanSandbox(Sandbox):
         self.mounts = tuple(self.mounts)
         if self.container_executable is not None:
             container_executable = PurePosixPath(self.container_executable)
-            if not container_executable.is_absolute() or ".." in container_executable.parts:
-                raise ValueError("container_executable must be an absolute container path")
+            if ".." in container_executable.parts:
+                raise ValueError("container_executable cannot contain '..'")
             self.container_executable = container_executable
         targets = [self.container_root, *(mount.target for mount in self.mounts)]
         if len(targets) != len(set(targets)):
@@ -611,7 +611,7 @@ class PodmanSandbox(Sandbox):
     def _container_command(self, command: Command) -> list[str]:
         command_argv = self._argv(command)
         executable = Path(command_argv[0]).expanduser()
-        if self.container_executable is not None:
+        if self.container_executable is not None and executable.is_absolute():
             command_argv[0] = str(self.container_executable)
         elif executable.is_absolute():
             resolved = executable.resolve(strict=False)

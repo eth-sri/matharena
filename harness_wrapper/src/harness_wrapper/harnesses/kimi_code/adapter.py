@@ -27,10 +27,10 @@ _MINIMAL_AGENT_FILE = """---
 name: harness
 description: Minimal reproducible benchmark agent
 tools:
-  - Bash
+{tools}
 subagents: []
 ---
-Use the Bash tool to solve the user's task.
+Use the available tools to solve the user's task.
 """
 
 
@@ -328,6 +328,7 @@ class KimiCodeAgent(Agent):
                     listen_host=route.listen_host,
                     client_host=route.client_host,
                     allow_remote_clients=route.allow_remote_clients,
+                    offline_models=self._offline_models,
                     unix_socket=route.unix_socket,
                     client_port=route.client_port,
                 ) as bridge,
@@ -376,6 +377,7 @@ class KimiCodeAgent(Agent):
                 listen_host=route.listen_host,
                 client_host=route.client_host,
                 allow_remote_clients=route.allow_remote_clients,
+                offline_models=self._offline_models,
                 unix_socket=route.unix_socket,
                 client_port=route.client_port,
             ) as proxy,
@@ -427,6 +429,7 @@ class KimiCodeAgent(Agent):
                 listen_host=route.listen_host,
                 client_host=route.client_host,
                 allow_remote_clients=route.allow_remote_clients,
+                offline_models=self._offline_models,
                 unix_socket=route.unix_socket,
                 client_port=route.client_port,
             ) as bridge,
@@ -544,8 +547,10 @@ class KimiCodeAgent(Agent):
         skills_dir = state_dir / "empty-skills"
         agent_file = state_dir / "minimal-kimi-agent.md"
         skills_dir.mkdir(parents=True, exist_ok=True)
-        if not agent_file.exists() or agent_file.read_text(encoding="utf-8") != _MINIMAL_AGENT_FILE:
-            agent_file.write_text(_MINIMAL_AGENT_FILE, encoding="utf-8")
+        tools = ["Bash", "WebSearch", "FetchURL"] if self.internet_enabled else ["Bash"]
+        content = _MINIMAL_AGENT_FILE.format(tools="\n".join(f"  - {name}" for name in tools))
+        if not agent_file.exists() or agent_file.read_text(encoding="utf-8") != content:
+            agent_file.write_text(content, encoding="utf-8")
         return (
             Path(".harness_wrapper/minimal-kimi-agent.md").as_posix(),
             Path(".harness_wrapper/empty-skills").as_posix(),

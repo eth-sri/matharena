@@ -1,0 +1,24 @@
+model: gemini-3.8-flash
+api: google
+harness: opencode
+harness_version: "1.18.27"
+concurrent_requests: 16
+max_tokens: 65536
+cache_read_cost: 0.075
+read_cost: 0.75
+tool_choice: auto
+write_cost: 3.75
+human_readable_id: Gemini 3.8 Flash (low, OpenCode)
+date: "2026-09-02"
+reasoning_effort: low
+other_params:
+  open: false
+  creator: Google
+
+harness_config:
+  auth: api
+  container_executable: opencode
+  cpu_limit: 4
+  memory_gb: 12
+  pids_limit: 768
+  tmpfs_size: 1g

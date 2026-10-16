@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import socketserver
 import subprocess
 import threading
 import time
 import urllib.request
 from contextlib import suppress
+from functools import cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
@@ -27,14 +29,21 @@ from matharena.solvers.harness_solver import (
     CONTAINER_HARNESS_VENV,
     DEFAULT_HARNESS_DOCKER_IMAGE,
     DockerHarnessSandbox,
+    PodmanHarnessSandbox,
 )
 
 
+CONTAINER_RUNTIME = os.environ.get("MATHARENA_TEST_CONTAINER_RUNTIME", "docker")
+if CONTAINER_RUNTIME not in {"docker", "podman"}:
+    raise ValueError("MATHARENA_TEST_CONTAINER_RUNTIME must be docker or podman")
+
+
+@cache
 def _image_available() -> bool:
     try:
         return (
             subprocess.run(
-                ["docker", "image", "inspect", DEFAULT_HARNESS_DOCKER_IMAGE],
+                [CONTAINER_RUNTIME, "image", "inspect", DEFAULT_HARNESS_DOCKER_IMAGE],
                 check=False,
                 capture_output=True,
                 timeout=15,
@@ -105,10 +114,14 @@ _TEST_CLI_RELEASES = {
     "qwen": ("qwen-code", "0.23.0"),
     "opencode": ("opencode", "1.18.27"),
     "deepcode": ("deepcode", "0.3.1"),
+    "grok": ("grok-build", "1.0.40"),
+    "vibe": ("mistral-vibe", "2.26.1"),
 }
 
 
-def _sandbox(tmp_path, executable: str = "kimi") -> DockerHarnessSandbox:
+def _sandbox(
+    tmp_path, executable: str = "kimi"
+) -> DockerHarnessSandbox | PodmanHarnessSandbox:
     mounts: tuple[SandboxMount, ...] = ()
     container_executable: str | PurePosixPath = executable
     release = _TEST_CLI_RELEASES.get(executable)
@@ -122,7 +135,11 @@ def _sandbox(tmp_path, executable: str = "kimi") -> DockerHarnessSandbox:
             )
         mounts = (SandboxMount(prefix, PurePosixPath("/opt/harness-cli")),)
         container_executable = PurePosixPath("/opt/harness-cli/bin") / executable
-    return DockerHarnessSandbox(
+    sandbox_class = PodmanHarnessSandbox if CONTAINER_RUNTIME == "podman" else DockerHarnessSandbox
+    userns = os.environ.get("MATHARENA_CONTAINER_USERNS")
+    if not userns and CONTAINER_RUNTIME == "podman" and os.getuid() != 0:
+        userns = "keep-id"
+    return sandbox_class(
         root=tmp_path,
         image=DEFAULT_HARNESS_DOCKER_IMAGE,
         network_enabled=False,
@@ -143,7 +160,7 @@ def _sandbox(tmp_path, executable: str = "kimi") -> DockerHarnessSandbox:
             "--read-only",
             "--tmpfs",
             "/tmp:rw,nosuid,nodev,size=256m,mode=1777",
-        ),
+        ) + (("--userns", userns) if userns else ()),
     )
 
 
@@ -155,6 +172,122 @@ def _environment() -> dict[str, str]:
         "TMPDIR": "/tmp",
         "PATH": CONTAINER_HARNESS_PATH,
     }
+
+
+@pytest.mark.skipif(not _image_available(), reason="selected harness runtime image is not built")
+def test_container_sandbox_workspace_hardening_and_resource_limits(docker_workspace):
+    sandbox = _sandbox(docker_workspace, "sh")
+    result = sandbox.run(
+        ["python", "-c", """
+import errno, os
+from pathlib import Path
+
+Path('/work/persisted.txt').write_text('workspace is writable')
+try:
+    Path('/matharena-rootfs-write-test').write_text('unexpected')
+except OSError as error:
+    assert error.errno == errno.EROFS, error
+else:
+    raise AssertionError('root filesystem is writable')
+status = dict(line.split(':', 1) for line in Path('/proc/self/status').read_text().splitlines())
+assert status['NoNewPrivs'].strip() == '1'
+assert int(status['CapEff'].strip(), 16) == 0
+assert Path('/sys/fs/cgroup/memory.max').read_text().strip() == '2147483648'
+quota, period = map(int, Path('/sys/fs/cgroup/cpu.max').read_text().split())
+assert quota / period == 2
+assert Path('/sys/fs/cgroup/pids.max').read_text().strip() == '256'
+print(os.getuid(), os.getgid())
+"""],
+        env=_environment(), timeout=30,
+    )
+    assert result.ok, result.stderr
+    assert result.stdout.strip() == f"{os.getuid()} {os.getgid()}"
+    path = docker_workspace / "persisted.txt"
+    assert path.stat().st_uid == os.getuid()
+    resumed = sandbox.run(["cat", "/work/persisted.txt"], env=_environment(), timeout=30)
+    assert resumed.ok, resumed.stderr
+    assert resumed.stdout == "workspace is writable"
+
+
+@pytest.mark.skipif(not _image_available(), reason="selected harness runtime image is not built")
+def test_container_sandbox_proxy_access_without_public_network(docker_workspace):
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"MODEL_PROXY_OK")
+
+        def log_message(self, *args):
+            pass
+
+    sandbox = _sandbox(docker_workspace, "sh")
+    with sandbox.expose_host_service() as route:
+        if route.unix_socket is not None:
+            server = socketserver.ThreadingUnixStreamServer(str(route.unix_socket), Handler)
+            port = route.client_port
+        else:
+            server = ThreadingHTTPServer((route.listen_host, 0), Handler)
+            port = server.server_address[1]
+        with server:
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                result = sandbox.run(
+                    ["python", "-c", """
+import socket, sys, urllib.request
+with urllib.request.urlopen(sys.argv[1], timeout=5) as response:
+    assert response.read() == b'MODEL_PROXY_OK'
+try:
+    connection = socket.create_connection(('1.1.1.1', 443), timeout=2)
+except OSError:
+    pass
+else:
+    connection.close()
+    raise AssertionError('container has public network access')
+print('PROXY_ONLY_OK')
+""", f"http://{route.client_host}:{port}/"],
+                    env=_environment(), timeout=30,
+                )
+                assert result.ok, result.stderr
+                assert result.stdout.strip() == "PROXY_ONLY_OK"
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
+
+
+@pytest.mark.skipif(not _image_available(), reason="selected harness runtime image is not built")
+def test_container_sandbox_stop_removes_running_child_tools(docker_workspace):
+    sandbox = _sandbox(docker_workspace, "sh")
+    argv, cwd, env = sandbox.prepare_command(
+        ["sh", "-c", "sleep 60 & wait"], cwd=docker_workspace, env=_environment(),
+    )
+    process = subprocess.Popen(argv, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            state = subprocess.run(
+                [CONTAINER_RUNTIME, "inspect", "--format", "{{.State.Running}}", sandbox.container_name],
+                capture_output=True, text=True, timeout=5,
+            )
+            if state.returncode == 0 and state.stdout.strip() == "true":
+                break
+            if process.poll() is not None:
+                pytest.fail(f"container exited before cancellation: {process.communicate()}")
+            time.sleep(0.1)
+        else:
+            pytest.fail("container did not start within 15 seconds")
+        sandbox.stop()
+        process.communicate(timeout=10)
+        state = subprocess.run(
+            [CONTAINER_RUNTIME, "inspect", sandbox.container_name],
+            capture_output=True, timeout=5,
+        )
+        assert state.returncode != 0, "cancelled container still exists"
+    finally:
+        sandbox.stop()
+        if process.poll() is None:
+            process.kill()
+        process.communicate(timeout=10)
 
 
 @pytest.mark.skipif(
@@ -181,7 +314,7 @@ def test_scientific_python_is_the_default_container_python(docker_workspace):
     ]
 
 
-@pytest.mark.skipif(not _image_available(), reason="shared harness Docker image is not built")
+@pytest.mark.skipif(not _image_available(), reason="selected harness runtime image is not built")
 def test_sagemath_works_in_read_only_offline_harness(docker_workspace):
     result = _sandbox(docker_workspace, "sh").run(
         [
@@ -556,7 +689,7 @@ class _FakeCapacityCodexHandler(_FakeToolFreeCodexHandler):
 
 
 @pytest.mark.parametrize("auth", ("api", "subscription"))
-@pytest.mark.skipif(not _image_available(), reason="harness Docker image is not built")
+@pytest.mark.skipif(not _image_available(), reason="selected harness runtime image is not built")
 def test_codex_capacity_retries_native_session_without_paid_credits(
     docker_workspace, monkeypatch, auth, codex_websocket_upstream
 ):
@@ -666,7 +799,7 @@ def test_codex_capacity_retries_native_session_without_paid_credits(
 
 
 @pytest.mark.parametrize("auth", ("api", "subscription"))
-@pytest.mark.skipif(not _image_available(), reason="harness Docker image is not built")
+@pytest.mark.skipif(not _image_available(), reason="selected harness runtime image is not built")
 def test_codex_astra_tool_free_start_and_resume_without_paid_credits(
     docker_workspace, monkeypatch, auth, codex_websocket_upstream
 ):
@@ -956,9 +1089,13 @@ def test_antigravity_cli_container_proxy_end_to_end_without_paid_credits(
         for line in request_log.read_text(encoding="utf-8").splitlines()
     ]
     assert len(persisted_requests) == 3
-    assert [record["event"]["content"] for record in persisted_requests] == [
-        request["payload"] for request in _FakeGeminiHandler.requests
-    ]
+    # Title generation and the main request run concurrently. Capture occurs
+    # before forwarding, so upstream arrival order may differ from log order.
+    assert sorted(
+        json.dumps(record["event"]["content"], sort_keys=True) for record in persisted_requests
+    ) == sorted(
+        json.dumps(request["payload"], sort_keys=True) for request in _FakeGeminiHandler.requests
+    )
     assert all("headers" not in record for record in persisted_requests)
     model_requests = [
         item
@@ -1290,3 +1427,98 @@ def test_codex_subscription_live_end_to_end(docker_workspace):
     assert any("CODEX_SUBSCRIPTION_E2E_OK" in str(event.content) for event in events)
     tool_results = [event for event in events if event.type == "tool_result"]
     assert any("CODEX_SHELL_OK" in str(event.content) for event in tool_results)
+
+
+@pytest.mark.skipif(not _image_available(), reason="selected harness runtime image is not built")
+def test_codex_openrouter_web_with_subagent_and_resume(docker_workspace, monkeypatch):
+    from harness_wrapper.harnesses.codex_cli import adapter
+    from harness_wrapper.models.request_capture import RequestCaptureProxy
+
+    monkeypatch.setitem(_TEST_CLI_RELEASES, "codex", ("codex-cli", "0.159.0"))
+
+    class Handler(_FakeCodexResponsesHandler):
+        requests = []
+        root_calls = 0
+
+        def do_POST(self):
+            payload = json.loads(self.rfile.read(int(self.headers["content-length"])))
+            self.requests.append({"payload": payload, "path": self.path})
+            meta = json.loads(payload["client_metadata"]["x-codex-turn-metadata"])
+            child = meta.get("agent_name", "/root") != "/root"
+            if not child:
+                type(self).root_calls += 1
+            if not child and self.root_calls <= 2:
+                name = "spawn_agent" if self.root_calls == 1 else "wait_agent"
+                arguments = (
+                    {"task_name": "web_check", "message": "Check the search results.", "agent_type": "worker", "fork_turns": "none"}
+                    if self.root_calls == 1 else {"timeout_ms": 10000}
+                )
+                item = {"id": "fc_" + name, "type": "function_call", "status": "completed",
+                        "call_id": "call_" + name, "name": name, "namespace": "collaboration",
+                        "arguments": json.dumps(arguments)}
+            elif not child and self.root_calls == 3:
+                item = {"id": "ctc_shell", "type": "custom_tool_call", "status": "completed",
+                        "call_id": "call_shell", "name": "exec", "namespace": "functions",
+                        "input": 'text(await tools.exec_command({cmd:"printf HOSTED_WEB_SHELL_OK"}));'}
+            else:
+                item = {"id": "msg_done", "type": "message", "status": "completed", "role": "assistant",
+                        "content": [{"type": "output_text", "text": "HOSTED_WEB_OK", "annotations": []}]}
+            items = [item]
+            if child or self.root_calls == 1:
+                # Simulate a provider-executed search before its next client tool/final answer.
+                items.insert(0, {"id": "ws_child" if child else "ws_root", "type": "web_search_call",
+                                 "status": "completed", "action": {"type": "search", "query": "MathArena"}})
+            response = self._response("resp_" + str(len(self.requests)), item)
+            response["output"] = items
+            events = [{"type": "response.output_item.done", "sequence_number": i,
+                       "output_index": i, "item": v} for i, v in enumerate(items)]
+            events.append({"type": "response.completed", "sequence_number": len(events), "response": response})
+            body = "".join("data: " + json.dumps(event) + "\n\n" for event in events).encode()
+            self.send_response(200)
+            self.send_header("content-type", "text/event-stream")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    upstream = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+    thread.start()
+
+    def local_proxy(_url, observer, **kwargs):
+        return RequestCaptureProxy(f"http://127.0.0.1:{upstream.server_port}/v1", observer, **kwargs)
+
+    monkeypatch.setattr(adapter, "RequestCaptureProxy", local_proxy)
+    sandbox = _sandbox(docker_workspace, "codex")
+    sandbox.network_enabled = True
+    agent = Agent(
+        type="codex", model=Model("openai/gpt-6-astra", api_url="https://openrouter.ai/api/v1",
+                                  api_key="local-test-only", reasoning="ultra"),
+        env=sandbox, dir=docker_workspace, executable="/usr/bin/true", environment=_environment(),
+        minimal_context=True, model_context_window=1050000, subagents={"worker": "openai/gpt-6-astra"},
+        auto_wait=False, auto_fallback=False, max_recovery_attempts=0,
+    )
+    timer = threading.Timer(45, sandbox.stop)
+    timer.start()
+    try:
+        events = agent.run("Search, delegate, and check the shell.")
+        events += agent.resume("Continue the same task.")
+    finally:
+        timer.cancel()
+        sandbox.stop()
+        agent.terminate()
+        upstream.shutdown()
+        upstream.server_close()
+        thread.join(timeout=2)
+    assert any(e.type == "tool_result" and "HOSTED_WEB_SHELL_OK" in str(e.content) for e in events)
+    assert any(e.type == "result" and "HOSTED_WEB_OK" in str(e.content) for e in events)
+    assert any(e.tool_name == "web_search" for e in events)
+    names = set()
+    for request in Handler.requests:
+        payload = request["payload"]
+        assert request["path"] == "/v1/responses"
+        assert payload["tools"] == [{"type": "web_search", "external_web_access": True}]
+        meta = json.loads(payload["client_metadata"]["x-codex-turn-metadata"])
+        names.add(meta["agent_name"])
+        assert meta["reasoning_effort"] == "ultra"
+    assert names == {"/root", "/root/web_check"}
+    assert "ws_root" in json.dumps(Handler.requests[-1]["payload"]["input"])

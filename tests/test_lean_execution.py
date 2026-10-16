@@ -46,9 +46,6 @@ def test_run_comparator_check_normalizes_persistent_imports(monkeypatch, tmp_pat
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
     comparator_project.mkdir()
-    lean_prefix = tmp_path / "lean-toolchain"
-    (lean_prefix / "bin").mkdir(parents=True)
-    (lean_prefix / "bin" / "lake").touch()
     (comparator_project / "lakefile.lean").write_text("import Lake\n", encoding="utf-8")
     (comparator_project / "lean-toolchain").write_text("leanprover/lean4:v4.31.0\n", encoding="utf-8")
 
@@ -58,6 +55,9 @@ def test_run_comparator_check_normalizes_persistent_imports(monkeypatch, tmp_pat
     monkeypatch.setattr(lean_execution, "COMPARATOR_PROJECT_DIR", comparator_project)
 
     captured = {}
+    lean_prefix = tmp_path / "lean-toolchain"
+    (lean_prefix / "bin").mkdir(parents=True)
+    (lean_prefix / "bin" / "lake").touch()
 
     def fake_run(*args, **kwargs):
         if args[0] == ["lean", "--print-prefix"]:
@@ -137,9 +137,6 @@ def test_landrun_permission_error_is_reported_as_unavailable(monkeypatch, tmp_pa
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
     comparator_project.mkdir()
-    lean_prefix = tmp_path / "lean-toolchain"
-    (lean_prefix / "bin").mkdir(parents=True)
-    (lean_prefix / "bin" / "lake").touch()
     (comparator_project / "lakefile.lean").write_text("import Lake\n", encoding="utf-8")
     (comparator_project / "lean-toolchain").write_text("leanprover/lean4:v4.31.0\n", encoding="utf-8")
 
@@ -150,14 +147,10 @@ def test_landrun_permission_error_is_reported_as_unavailable(monkeypatch, tmp_pa
     monkeypatch.setattr(
         lean_execution.subprocess,
         "run",
-        lambda *args, **kwargs: (
-            SimpleNamespace(returncode=0, stdout=str(lean_prefix), stderr="")
-            if args[0] == ["lean", "--print-prefix"]
-            else SimpleNamespace(
-                returncode=1,
-                stdout="Building Challenge\n",
-                stderr="[landrun:error] permission denied\nuncaught exception: Child exited with 1\n",
-            )
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=1,
+            stdout="Building Challenge\n",
+            stderr="[landrun:error] permission denied\nuncaught exception: Child exited with 1\n",
         ),
     )
 

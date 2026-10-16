@@ -25,6 +25,14 @@ class OpenCodeAgent(Agent):
         package="opencode-ai",
     )
 
+    def __init__(self, *args: Any, model_context_window: int | None = None, **kwargs: Any) -> None:
+        if model_context_window is not None and (
+            type(model_context_window) is not int or model_context_window <= 0
+        ):
+            raise ValueError("model_context_window must be a positive integer")
+        self.model_context_window = model_context_window
+        super().__init__(*args, **kwargs)
+
     @property
     def _qualified_model(self) -> str:
         return f"{_PROVIDER_ID}/{self.model_name}"
@@ -35,8 +43,31 @@ class OpenCodeAgent(Agent):
             "tool_call": True,
         }
         protocol = self._model_protocol() or "openai"
-        if getattr(self.model, "reasoning", None) is not None:
+        override_provider = getattr(self.model, "request_overrides", None)
+        overrides = override_provider() if callable(override_provider) else {}
+        reasoning = overrides.get("reasoning", {})
+        if getattr(self.model, "reasoning", None) is not None or (
+            isinstance(reasoning, Mapping) and reasoning.get("enabled") is True
+        ):
             model_config["reasoning"] = True
+        if self.model_context_window is not None:
+            output_limit = (
+                overrides.get("generationConfig", {}).get("maxOutputTokens")
+                if protocol == "gemini"
+                else overrides.get("max_completion_tokens", overrides.get("max_tokens"))
+            )
+            if type(output_limit) is not int or not 0 < output_limit < self.model_context_window:
+                raise ValueError(
+                    "OpenCode model_context_window requires a positive API output limit "
+                    "smaller than the context window"
+                )
+            # The proxy can request more output than OpenCode's internal output cap.
+            # Set input explicitly so compaction reserves the actual API allowance.
+            model_config["limit"] = {
+                "context": self.model_context_window,
+                "input": self.model_context_window - output_limit,
+                "output": output_limit,
+            }
         provider_package = "@ai-sdk/google" if protocol == "gemini" else "@ai-sdk/openai-compatible"
         provider_base_url = f"{base_url.rstrip('/')}/v1beta" if protocol == "gemini" else base_url
         config: dict[str, Any] = {
@@ -54,12 +85,17 @@ class OpenCodeAgent(Agent):
             "share": "disabled",
             "agent": {"title": {"disable": True}, "summary": {"disable": True}},
         }
+        if self.model_context_window is not None:
+            config["compaction"] = {"auto": True, "reserved": min(20000, output_limit)}
         if self.minimal_context:
             config.update(
                 {
                     "snapshot": False,
                     "plugin": [],
-                    "tools": {"task": False, "skill": False, "webfetch": False, "websearch": False},
+                    "tools": {
+                        "task": False, "skill": False,
+                        "webfetch": self.internet_enabled, "websearch": self.internet_enabled,
+                    },
                     "instructions": [],
                     "mcp": {},
                     "formatter": False,
@@ -70,14 +106,14 @@ class OpenCodeAgent(Agent):
                         "title": {"disable": True},
                         "summary": {"disable": True},
                         "build": {
-                            "prompt": _MINIMAL_INSTRUCTIONS,
+                            "prompt": self.network_instructions(_MINIMAL_INSTRUCTIONS),
                             "mode": "primary",
                             "permission": {
                                 "*": "allow",
                                 "task": "deny",
                                 "skill": "deny",
-                                "webfetch": "deny",
-                                "websearch": "deny",
+                                "webfetch": "allow" if self.internet_enabled else "deny",
+                                "websearch": "allow" if self.internet_enabled else "deny",
                                 "external_directory": "deny",
                             },
                         },
@@ -102,6 +138,7 @@ class OpenCodeAgent(Agent):
                 "OPENCODE_DISABLE_AUTOUPDATE": "true",
                 "OPENCODE_DISABLE_MODELS_FETCH": "true",
                 "OPENCODE_AUTO_SHARE": "false",
+                "OPENCODE_ENABLE_EXA": "true" if self.internet_enabled else "false",
             }
         )
         if self.minimal_context:
@@ -151,6 +188,7 @@ class OpenCodeAgent(Agent):
                 listen_host=route.listen_host,
                 client_host=route.client_host,
                 allow_remote_clients=route.allow_remote_clients,
+                offline_models=self._offline_models,
                 unix_socket=route.unix_socket,
                 client_port=route.client_port,
             ) as proxy,

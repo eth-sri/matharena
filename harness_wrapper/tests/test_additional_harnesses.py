@@ -334,6 +334,8 @@ def test_opencode_inline_provider_is_minimal_and_usage_includes_cache(
     assert command[command.index("--model") + 1] == "harness-wrapper/vendor/model-test"
     assert command[command.index("--variant") + 1] == "high"
     assert config["enabled_providers"] == ["harness-wrapper"]
+    assert "limit" not in config["provider"]["harness-wrapper"]["models"]["vendor/model-test"]
+    assert "compaction" not in config
     assert config["plugin"] == []
     assert config["tools"] == {"task": False, "skill": False, "webfetch": False, "websearch": False}
     assert config["mcp"] == {}
@@ -401,3 +403,46 @@ def test_antigravity_provider_usage_includes_thoughts(tmp_path: Path) -> None:
         "input_tokens": 100, "output_tokens": 639, "cache_read_tokens": 30,
     }
     assert agent._take_api_usage() is None
+
+
+@pytest.mark.parametrize("protocol, overrides, output", [
+    ("openai", {"max_tokens": 131072, "reasoning": {"enabled": True}}, 131072),
+    ("openai", {"max_completion_tokens": 65536}, 65536),
+    ("gemini", {"generationConfig": {"maxOutputTokens": 65536}}, 65536),
+])
+def test_opencode_compaction_reserves_proxy_output_budget(tmp_path, protocol, overrides, output):
+    model = Model(
+        "vendor/model-test", api_url="https://example.invalid/v1", api_key="placeholder",
+        api_type=protocol, request_overrides=overrides,
+    )
+    agent = _agent(OpenCodeAgent, tmp_path, model, model_context_window=1000000, minimal_context=True)
+    config = json.loads(agent.model_environment()["OPENCODE_CONFIG_CONTENT"])
+    definition = config["provider"]["harness-wrapper"]["models"]["vendor/model-test"]
+    assert definition["limit"] == {"context": 1000000, "input": 1000000 - output, "output": output}
+    assert config["compaction"] == {"auto": True, "reserved": 20000}
+    # OpenCode's input-limit branch must reserve the actual proxy output cap,
+    # even when its internal maxOutputTokens() returns a smaller number.
+    threshold = definition["limit"]["input"] - config["compaction"]["reserved"]
+    assert threshold + output + 20000 == 1000000
+    assert model.request_overrides() == overrides
+    if overrides.get("reasoning", {}).get("enabled"):
+        assert definition["reasoning"] is True
+        assert "--variant" not in agent.build_command("solve")
+
+
+@pytest.mark.parametrize("context", [0, -1, True, 1000.5])
+def test_opencode_rejects_invalid_context_window(tmp_path, context):
+    model = Model("test", api_url="https://example.invalid/v1", api_key="placeholder", api_type="openai")
+    with pytest.raises(ValueError, match="model_context_window must be a positive integer"):
+        _agent(OpenCodeAgent, tmp_path, model, model_context_window=context)
+
+
+@pytest.mark.parametrize("output", [None, 0, -1, True, 1.5, 1000000])
+def test_opencode_requires_output_budget_to_fit_context(tmp_path, output):
+    model = Model(
+        "test", api_url="https://example.invalid/v1", api_key="placeholder",
+        api_type="openai", request_overrides={"max_tokens": output},
+    )
+    agent = _agent(OpenCodeAgent, tmp_path, model, model_context_window=1000000)
+    with pytest.raises(ValueError, match="positive API output limit"):
+        agent.model_environment()

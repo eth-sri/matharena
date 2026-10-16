@@ -1,9 +1,9 @@
 instruction: |
   Prove or disprove the following statement, clearly indicating whether you believe it to be false or true:
 strict_parsing: false
-n_problems: 32
+n_problems: 31
 date: "2026-03-07"
 final_answer: false
-dataset_path: data/arxiv_false/february
+dataset_path: MathArena/brokenarxiv-0226
 judge_configs:
   - judges/arxiv_judge

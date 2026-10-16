@@ -189,8 +189,9 @@ def test_failed_harness_future_does_not_discard_other_batch_results(
 
 
 @pytest.mark.parametrize("has_terminal_result", [True, False])
+@pytest.mark.parametrize("subagents", [{}, {"worker": "gpt-6-astra"}])
 def test_empty_completed_harness_attempt_is_saved_with_usage(
-    tmp_path, monkeypatch, has_terminal_result
+    tmp_path, monkeypatch, has_terminal_result, subagents
 ):
     from matharena.json_zst import load_json_zst
     from matharena.runs import Runs
@@ -212,11 +213,16 @@ def test_empty_completed_harness_attempt_is_saved_with_usage(
             "harness_config": {
                 "managed_cli": False,
                 "workspace_root": str(tmp_path / "p{problem_idx}_r{run_idx}"),
+                **({"subagents": subagents} if subagents else {}),
             },
         },
         "",
     )
-    monkeypatch.setattr("matharena.solvers.harness_solver.Agent", lambda **kwargs: agent)
+    def make_agent(**kwargs):
+        assert kwargs["subagents"] == subagents
+        return agent
+
+    monkeypatch.setattr("matharena.solvers.harness_solver.Agent", make_agent)
     monkeypatch.setattr(solver, "_prepare_harness_cli", lambda: None)
     monkeypatch.setattr(solver, "_build_model", lambda: None)
     monkeypatch.setattr(solver, "_build_sandbox", lambda workspace: None)
@@ -306,6 +312,29 @@ def test_api_model_uses_existing_matharena_openai_credentials(monkeypatch, tmp_p
     assert "api-credit-key" not in model.cli_environment("openai").values()
 
 
+@pytest.mark.parametrize("harness", ["claude", "claude-code", "anthropic", "codex"])
+def test_openrouter_harness_uses_native_protocol_and_host_credentials(monkeypatch, tmp_path, harness):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-credit-key")
+    path = Path(__file__).resolve().parents[1] / "configs/models/anthropic/opus_5_max.yaml"
+    config = yaml.safe_load(path.read_text())
+    config["harness"] = harness
+    config["harness_config"]["workspace_root"] = str(tmp_path / "p{problem_idx}_r{run_idx}")
+    solver = HarnessSolver(_solver_config(**config), "{problem}", config, "")
+    model = solver._build_model()
+    protocol = "openai" if harness == "codex" else "anthropic"
+    endpoint = model.endpoint_for(protocol)
+    assert endpoint.url == (
+        "https://openrouter.ai/api/v1" if harness == "codex" else "https://openrouter.ai/api"
+    )
+    assert endpoint.headers["Authorization"] == "Bearer openrouter-credit-key"
+    assert endpoint.api_key != "openrouter-credit-key"
+    assert "openrouter-credit-key" not in model.cli_environment(protocol).values()
+    assert model.reasoning == "max"
+    if harness != "codex":
+        assert model.request_overrides() == config["extra_body"]
+        assert "reasoning_effort" not in model.request_overrides()
+
+
 def test_kimi_harness_uses_glm_api_credits_through_host_proxy(monkeypatch, tmp_path):
     monkeypatch.setenv("GLM_API_KEY", "glm-api-credit-key")
     solver = HarnessSolver(
@@ -336,31 +365,6 @@ def test_kimi_harness_uses_glm_api_credits_through_host_proxy(monkeypatch, tmp_p
     assert endpoint.api_key != "glm-api-credit-key"
     assert endpoint.headers["Authorization"] == "Bearer glm-api-credit-key"
     assert "glm-api-credit-key" not in model.cli_environment("openai").values()
-
-
-def test_glm_53_config_uses_opencode_with_glm_api(monkeypatch, tmp_path):
-    monkeypatch.setenv("GLM_API_KEY", "glm-api-credit-key")
-    monkeypatch.setenv("BIGMODEL_API_KEY", "unused-bigmodel-key")
-    config_path = Path(__file__).resolve().parents[1] / "configs/models/glm/glm-53.yaml"
-    config = yaml.safe_load(config_path.read_text())
-    assert config["harness"] == "opencode"
-    assert config["harness_version"] == "1.18.27"
-    assert config["harness_config"]["auth"] == "api"
-    assert Runner._resolve_harness(_runner(allow_harness=True), _solver_config(**config)) == "opencode"
-    config["harness_config"]["workspace_root"] = str(tmp_path / "p{problem_idx}_r{run_idx}")
-    solver = HarnessSolver(_solver_config(**config), "{problem}", config, "")
-    model = solver._build_model()
-    endpoint = model.endpoint_for("openai")
-    assert endpoint.url == "https://api.z.ai/api/paas/v4"
-    assert endpoint.headers["Authorization"] == "Bearer glm-api-credit-key"
-    assert endpoint.api_key != "glm-api-credit-key"
-    assert "glm-api-credit-key" not in model.cli_environment("openai").values()
-    overrides = model.request_overrides()
-    assert overrides["max_tokens"] == 131072
-    assert overrides["temperature"] == 1.0
-    assert overrides["top_p"] == 0.95
-    assert overrides["thinking"] == {"type": "enabled"}
-    assert not {"harness", "harness_version", "harness_config"} & overrides.keys()
 
 
 def test_kimi_harness_normalizes_google_requests_and_preserves_model_params(
@@ -1112,3 +1116,34 @@ def test_muse_config_routes_by_competition_and_preserves_max_reasoning(tmp_path,
     assert env["MUSE_EXPERIMENTAL_FIRST_TURN_MINIMAL_EFFORT"] == "0"
     assert env["TBH_STREAM_FIRST_EVENT_TIMEOUT_SECS"] == "28800"
     assert env["TBH_STREAM_IDLE_TIMEOUT_SECS"] == "28800"
+
+
+def test_mimo_opencode_config_preserves_router_settings_and_context(monkeypatch, tmp_path):
+    import json
+    from harness_wrapper import Agent
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "mimo-test-key")
+    root = Path(__file__).resolve().parents[1]
+    config = yaml.safe_load((root / "configs/models/xiaomi/mimo-v2.6-pro.yaml").read_text())
+    solver = HarnessSolver(_solver_config(**config), "{problem}", config, "")
+    model = solver._build_model()
+    endpoint = model.endpoint_for("openai")
+    assert endpoint.url == "https://openrouter.ai/api/v1"
+    assert endpoint.headers["Authorization"] == "Bearer mimo-test-key"
+    assert endpoint.api_key != "mimo-test-key"
+    assert model.request_overrides()["max_tokens"] == 131072
+    assert model.request_overrides()["reasoning"] == {"enabled": True}
+    assert model.request_overrides()["provider"] == {"only": ["io-net/fp8"], "allow_fallbacks": False}
+    executable = tmp_path / "opencode"
+    executable.write_text("#!/bin/sh\nexit 0\n")
+    executable.chmod(0o755)
+    agent = Agent(
+        type=solver.harness, model=model, executable=executable, dir=tmp_path,
+        subagents={}, minimal_context=True,
+        model_context_window=solver.harness_config["model_context_window"],
+    )
+    generated = json.loads(agent.model_environment()["OPENCODE_CONFIG_CONTENT"])
+    definition = generated["provider"]["harness-wrapper"]["models"][config["model"]]
+    assert definition["limit"] == {"context": 1000000, "input": 868928, "output": 131072}
+    assert definition["reasoning"] is True
+    assert generated["compaction"]["auto"] is True

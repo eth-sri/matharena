@@ -12,7 +12,7 @@ from flask import Flask, redirect, render_template, url_for, send_from_directory
 
 from matharena.configs import extract_existing_configs
 from matharena.json_zst import OUTPUT_JSON_SUFFIX, dump_json_zst, load_json_zst
-from matharena.utils import normalize_conversation
+from matharena.viewer_cache import ViewerResultCache
 
 """
     A dashboard app that shows all about a run
@@ -25,6 +25,11 @@ parser.add_argument("--port", type=int, default=5001)
 parser.add_argument("--output-folder", type=str, default="outputs")
 parser.add_argument("--config-folder", type=str, default="configs/models")
 parser.add_argument("--competition-config-folder", type=str, default="configs/competitions")
+parser.add_argument(
+    "--cache-dir",
+    default=os.path.join(os.path.dirname(__file__), ".cache"),
+    help="Directory for reusable result summaries (safe to delete).",
+)
 parser.add_argument(
     "--disable-overwrite",
     action="store_true",
@@ -44,6 +49,7 @@ args = parser.parse_args()
 
 current_comp = args.comp if args.comp is not None else "imo/imo_2025"  # fast-loading default comp
 model_id_to_config_path = {}
+result_cache = ViewerResultCache(args.cache_dir)
 
 # Find all comps, directories below outputs of depth 2
 all_comps = []
@@ -52,6 +58,7 @@ for root, dirs, files in os.walk(args.output_folder):
     depth = rel_path.count(os.sep)
     if depth == 1:
         all_comps.append(rel_path)
+        dirs.clear()  # Model outputs below this level cannot add competitions.
 
 # sort by date modified
 all_comps = sorted(all_comps, key=lambda x: os.path.getmtime(os.path.join(args.output_folder, x)), reverse=True)
@@ -74,17 +81,28 @@ def analyze_run(competition, models):
     model_id_to_config_path = {human_readable_ids[k]: k for k in human_readable_ids}
     out_dir = os.path.join(args.output_folder, competition)
 
-    results = {}
+    result_paths = {}
     for config_path in human_readable_ids:
         model_comp_dir = os.path.join(out_dir, config_path)
-        results[f"{human_readable_ids[config_path]}"] = {}
+        model = human_readable_ids[config_path]
+        result_paths[model] = {}
         for problem_file in os.listdir(model_comp_dir):
             if not problem_file.endswith(OUTPUT_JSON_SUFFIX):
                 continue
             problem_idx = int(problem_file.removesuffix(OUTPUT_JSON_SUFFIX))
-            data = load_json_zst(os.path.join(model_comp_dir, problem_file))
-            results[f"{human_readable_ids[config_path]}"][problem_idx] = data
-    return results
+            result_paths[model][problem_idx] = os.path.realpath(os.path.join(model_comp_dir, problem_file))
+    summaries = result_cache.summaries(path for paths in result_paths.values() for path in paths.values())
+    return {
+        model: {problem: {**summaries[path], "_viewer_result_path": path} for problem, path in paths.items()}
+        for model, paths in result_paths.items()
+    }
+
+
+def get_problem_result(model, problem):
+    record = results[model][int(problem)]
+    path = record.get("_viewer_result_path")
+    return result_cache.detail(path) if path else record
+
 
 def load_sources(comp):
     sources = {}
@@ -360,24 +378,11 @@ def get_problem_stats(results, model, problem):
     llm_annotations = [
         None if manual_overwrite[i] else llm_annotations[i] for i in range(len(corrects))
     ]
-    if len(corrects) == 0:
-        return {
-            "nb_instances": 0,
-            "corrects": [],
-            "accuracy": 0,
-            "warnings": [],
-            "llm_annotations": [],
-            "manual_overwrite": [],
-        }
-    nb_inst = len(corrects)
-    try:
-        acc = sum(corrects) / nb_inst
-    except Exception:
-        acc = 0
+    graded = [value for value in corrects if isinstance(value, (int, float)) and math.isfinite(value)]
     return {
-        "nb_instances": nb_inst,
+        "nb_instances": len(corrects),
         "corrects": corrects,
-        "accuracy": acc,
+        "accuracy": sum(graded) / len(graded) if graded else None,
         "warnings": warnings,
         "llm_annotations": llm_annotations,
         "manual_overwrite": manual_overwrite,
@@ -385,6 +390,8 @@ def get_problem_stats(results, model, problem):
 
 
 def get_tick(is_correct, warning, llm_annotation=None):
+    if not isinstance(is_correct, (int, float)) or not math.isfinite(is_correct):
+        return "❔"
     if isinstance(is_correct, bool):
         pass
     elif isinstance(is_correct, (int, float)):
@@ -393,8 +400,6 @@ def get_tick(is_correct, warning, llm_annotation=None):
         if is_correct <= 0.001:
             return "❌"
         return "🟨"
-    elif isinstance(is_correct, str):
-        return "❔"
 
     if llm_annotation is True:
         tick = "🤖"
@@ -420,49 +425,103 @@ def get_problem_ticks(results, model, problem):
     return ticks
 
 
+TOKEN_FIELDS = ("input_tokens", "cached_input_tokens", "output_tokens")
+
+
+@app.template_filter("token_count")
+def format_token_count(value):
+    if not isinstance(value, (int, float)) or not math.isfinite(value):
+        return "—"
+    return f"{value:,.0f}"
+
+
+def get_token_totals(record, runs):
+    totals = {}
+    for field in TOKEN_FIELDS:
+        value = record.get("cost", {}).get(field)
+        if not isinstance(value, (int, float)) or not math.isfinite(value):
+            details = record.get("detailed_costs", [])
+            values = [cost.get(field) for cost in details if isinstance(cost, dict)]
+            value = sum(values) if runs and len(values) == runs and all(
+                isinstance(item, (int, float)) and math.isfinite(item) for item in values
+            ) else None
+        totals[field] = value
+    return totals
+
+
+def tokens_per_run(totals, runs):
+    return {field: total / runs if total is not None and runs else None for field, total in totals.items()}
+
+
 def get_model_stats(results, model):
-    res = results[model]
-    nb_problems = len(res)
-    problem_stats = {problem: get_problem_stats(results, model, problem) for problem in res.keys()}
-    stats = {"problem_stats": problem_stats.copy()}
-    stats["nb_problems"] = len(res)
-    stats["n_solutions"] = sum([stat["nb_instances"] for stat in problem_stats.values()])
-    try:
-        stats["n_correct"] = sum([sum(stat["corrects"]) for stat in problem_stats.values()])
-    except Exception:
-        stats["n_correct"] = 0
-    stats["total_cost"] = sum([res[problem]["cost"]["cost"] for problem in res.keys()])
-    stats["cost_estimated"] = any(
-        cost.get("token_usage_recovery", {}).get("estimated", False)
-        for record in res.values() for cost in record.get("detailed_costs", [])
-    )
-    if nb_problems == 0:
-        stats["avg_accuracy"] = 0
-    else:
-        stats["avg_accuracy"] = sum([stat["accuracy"] for stat in problem_stats.values()]) / nb_problems
-    return stats
+    records = results[model]
+    problems = {problem: get_problem_stats(results, model, problem) for problem in records}
+    for problem, stat in problems.items():
+        stat["total_cost"] = records[problem]["cost"]["cost"]
+        stat["token_totals"] = get_token_totals(records[problem], stat["nb_instances"])
+        stat["cost_estimated"] = any(
+            cost.get("token_usage_recovery", {}).get("estimated", False)
+            for cost in records[problem].get("detailed_costs", [])
+        )
+    graded = [
+        value for stat in problems.values() for value in stat["corrects"]
+        if isinstance(value, (int, float)) and math.isfinite(value)
+    ]
+    accuracies = [stat["accuracy"] for stat in problems.values() if stat["accuracy"] is not None]
+    runs = sum(stat["nb_instances"] for stat in problems.values())
+    total_cost = sum(stat["total_cost"] for stat in problems.values())
+    token_totals = {}
+    for field in TOKEN_FIELDS:
+        values = [stat["token_totals"][field] for stat in problems.values() if stat["nb_instances"]]
+        token_totals[field] = sum(values) if values and all(value is not None for value in values) else None
+    return {
+        "tokens_per_run": tokens_per_run(token_totals, runs),
+        "problem_stats": problems,
+        "nb_problems": len(problems),
+        "n_solutions": runs,
+        "n_correct": sum(graded),
+        "n_graded": len(graded),
+        "n_pending": runs - len(graded),
+        "avg_accuracy": sum(accuracies) / len(accuracies) if accuracies else None,
+        "total_cost": total_cost,
+        "cost_per_run": total_cost / runs if runs else None,
+        "cost_estimated": any(stat["cost_estimated"] for stat in problems.values()),
+    }
 
 
 def model_stats_to_html(stats):
-    problem_stats_html = []
-    for problem, stat in sorted(stats["problem_stats"].items(), key=lambda x: x[0]):
-        problem_full_name = str(problem)
-        if problem in sources:
-            problem_full_name += f" ({sources[problem]})"
-        p = f"{problem_full_name}:{' '*(30-len(str(problem_full_name)))}"
-        p += f"{stat['accuracy']*100:6.2f}% "
-        p += f"{stat['nb_instances']} instances: "
-        for i, correct in enumerate(stat["corrects"]):
-            p += get_tick(correct, stat["warnings"][i], stat["llm_annotations"][i])
-        problem_stats_html.append(p)
+    def accuracy_fields(value):
+        return {
+            "avg_accuracy": f"{value * 100:.2f}%" if value is not None else "—",
+            "accuracy_value": value * 100 if value is not None else None,
+        }
+
+    problem_rows = []
+    for problem, stat in sorted(stats["problem_stats"].items()):
+        pending = sum(not isinstance(value, (int, float)) or not math.isfinite(value) for value in stat["corrects"])
+        problem_rows.append({
+            "id": problem,
+            "source": sources.get(problem),
+            **accuracy_fields(stat["accuracy"]),
+            "n_solutions": stat["nb_instances"],
+            "n_pending": pending,
+            "ticks": "".join(
+                get_tick(correct, stat["warnings"][i], stat["llm_annotations"][i])
+                for i, correct in enumerate(stat["corrects"])
+            ),
+            "total_cost": f"{stat['total_cost']:,.2f}",
+            "cost_estimated": stat["cost_estimated"],
+            "cost_per_run": f"{stat['total_cost'] / stat['nb_instances']:,.2f}" if stat["nb_instances"] else None,
+            "tokens_per_run": tokens_per_run(stat["token_totals"], stat["nb_instances"]),
+        })
     return {
-        "avg_accuracy": f"{stats['avg_accuracy']*100:.2f}%",
-        "nb_problems": stats["nb_problems"],
-        "n_solutions": stats["n_solutions"],
-        "n_correct": stats["n_correct"] if isinstance(stats["n_correct"], int) else round(stats["n_correct"], 2),
-        "total_cost": f"{stats['total_cost']:.2f}",
-        "cost_estimated": stats.get("cost_estimated", False),
-        "problem_stats": problem_stats_html,
+        **stats,
+        **accuracy_fields(stats["avg_accuracy"]),
+        "cost_value": stats["total_cost"],
+        "total_cost": f"{stats['total_cost']:,.2f}",
+        "cost_per_run_value": stats["cost_per_run"],
+        "cost_per_run": f"{stats['cost_per_run']:,.2f}" if stats["cost_per_run"] is not None else None,
+        "problem_rows": problem_rows,
     }
 
 
@@ -495,22 +554,24 @@ def index():
         stats = get_model_stats(results, model)
         stats_html[model] = model_stats_to_html(stats)
 
-    # sort models by avg accuracy
-    stats_html = dict(
-        sorted(
-            stats_html.items(),
-            key=lambda x: float(x[1]["avg_accuracy"].replace("%", "")),
-            reverse=True,
-        )
-    )
-    # sort models in sidebar_contents
-    sidebar_contents["models"] = sorted(
-        sidebar_contents["models"],
-        key=lambda x: float(stats_html[x]["avg_accuracy"].replace("%", "")),
-        reverse=True,
-    )
+    stats_html = dict(sorted(
+        stats_html.items(),
+        key=lambda item: (
+            -(item[1]["accuracy_value"] if item[1]["accuracy_value"] is not None else -1),
+            item[0].casefold(),
+        ),
+    ))
+    previous_accuracy = None
+    rank = None
+    for position, model_stats in enumerate(stats_html.values(), start=1):
+        accuracy = model_stats["accuracy_value"]
+        if accuracy is not None and accuracy != previous_accuracy:
+            rank = position
+        model_stats["rank"] = rank if accuracy is not None else None
+        previous_accuracy = accuracy
+    sidebar_contents["models"] = list(stats_html)
+    return render_template("index.html", title="MathArena", sidebar=sidebar_contents, stats=stats_html)
 
-    return render_template("index.html", title="MathArena App", sidebar=sidebar_contents, stats=stats_html)
 
 @app.route("/view/<model>")
 def model_view(model):
@@ -614,23 +675,40 @@ def render_message(message):
     return {"tagline": tagline, "content": content, "code": code, "role": role, "is_cot": is_cot}
 
 
-def render_conversation_html(conversation):
-    messages_html = ""
-    for i, message in enumerate(conversation):
-        is_last_message = i == len(conversation) - 1
-        msg_data = render_message(message)
+def final_response_index(conversation):
+    return next((
+        i for i in range(len(conversation) - 1, -1, -1)
+        if conversation[i].get("role") == "assistant" and conversation[i].get("type") == "response"
+    ), None)
 
+
+def render_conversation_html(conversation):
+    fragments = []
+    cot_parts = []
+
+    def flush_cot():
+        if cot_parts:
+            fragments.append(render_template("message.html", **cot_parts[0], cot_parts=cot_parts))
+            cot_parts.clear()
+
+    for i, message in enumerate(conversation):
+        msg_data = render_message(message)
+        if not msg_data["is_cot"]:
+            flush_cot()
         if (
             message.get("role") == "assistant"
             and not msg_data["content"]["text"]
             and not msg_data["content"]["img"]
             and not msg_data["code"]
-            and not is_last_message
+            and i != len(conversation) - 1
         ):
             continue
-
-        messages_html += render_template("message.html", **msg_data)
-    return messages_html
+        if msg_data["is_cot"]:
+            cot_parts.append(msg_data)
+        else:
+            fragments.append(render_template("message.html", **msg_data))
+    flush_cot()
+    return "".join(fragments)
 
 
 @app.route("/modelinteraction/<id>")
@@ -639,7 +717,7 @@ def model_interaction(id):
     if len(tokens) == 4:
         model, problem_name, i, extra = tokens
         assert extra == "history"
-        history = results[model][int(problem_name)]["history"][int(i)]
+        history = get_problem_result(model, problem_name)["history"][int(i)]
 
         options = ""
         for step in history:
@@ -656,7 +734,10 @@ def model_interaction(id):
         """
     else:
         model, problem_name, i = tokens
-        conversation = results[model][int(problem_name)]["messages"][int(i)]
+        conversation = get_problem_result(model, problem_name)["messages"][int(i)]
+        if request.args.get("trace_only") == "1":
+            final_idx = final_response_index(conversation)
+            conversation = [message for idx, message in enumerate(conversation) if idx != final_idx]
         return render_conversation_html(conversation)
 
 
@@ -665,7 +746,7 @@ def history_step(id):
     tokens = id.split(">>")
     model, problem_name, i, timestep_str, step_name = tokens
     timestep = int(timestep_str)
-    history = results[model][int(problem_name)]["history"][int(i)]
+    history = get_problem_result(model, problem_name)["history"][int(i)]
 
     target_step = None
     for step in history:
@@ -808,7 +889,7 @@ def problem_view(model, problem_name):
             problem_full_name = f"{problem_name_for} ({sources.get(problem_name_for)})"
         sidebar_contents["problems"][problem_name_for] = {"name": problem_full_name, "ticks": ticks, "class": cls}
 
-    res = results[model][int(problem_name)]
+    res = get_problem_result(model, problem_name)
     grading_record = grading_records.get(int(problem_name), {})
     problem_statement = res["problem"]
     img_path = f"/data/{current_comp}/problems/{problem_name}.png"
@@ -841,19 +922,29 @@ def problem_view(model, problem_name):
         answer, is_correct = res["answers"][i], res["correct"][i]
         warning = res["warnings"][i] if "warnings" in res else 0
         verdict = get_tick(is_correct, warning, llm_annotations[i])
-        correct_cls = "correct" if is_correct else "incorrect"
-        history = results[model][int(problem_name)].get("history", [])
+        if verdict == "❔":
+            correct_cls = "pending"
+        elif 0.001 < is_correct < 0.999:
+            correct_cls = "semicorrect"
+        else:
+            correct_cls = "correct" if is_correct >= 0.999 else "incorrect"
+        history = res.get("history", [])
         run_history = history[i] if i < len(history) else None
         manual_value = "auto"
         if manual_overwrite[i]:
             manual_value = "correct" if is_correct else "incorrect"
         
         metadata = get_instance_metadata(run_history if run_history is not None else [{"messages": messages}])
-        metadata['cost'] = res["detailed_costs"][i]
+        metadata['cost'] = res["detailed_costs"][i].copy()
         metadata["cost"]["cost"] = round(metadata["cost"]["cost"], 4)
         metadata["cost"]["time"] = round(metadata["cost"]["time"], 0) if metadata["cost"].get("time") is not None else None
+        final_idx = final_response_index(messages)
+        final_response = render_template(
+            "message.html", **render_message(messages[final_idx]), show_tagline=False,
+        ) if final_idx is not None else None
         instances.append(
             {
+                "final_response": final_response,
                 "run": i,
                 "verdict": verdict,
                 "warnings": warning,

@@ -11,6 +11,7 @@ from datasets import load_dataset
 from loguru import logger
 
 from matharena.grader import extract_and_grade
+from matharena.container_runtime import validate_container_runtime
 from matharena.parser import extract_answer
 from matharena.request_logger import request_logger
 from matharena.runs import Runs
@@ -54,6 +55,8 @@ class Runner:
         solver_configs_dir,
         output_dir,
         redo_all,
+        *,
+        container_runtime="docker",
     ):
         self.comp_name = comp_name
         self.runs_per_problem = runs_per_problem
@@ -62,6 +65,7 @@ class Runner:
         self.solver_configs_dir = solver_configs_dir
         self.base_output_dir = output_dir
         self.redo_all = redo_all
+        self.container_runtime = validate_container_runtime(container_runtime)
 
         # Load competition config
         competition_config_path = f"{self.comp_configs_dir}/{self.comp_name}.yaml"
@@ -69,6 +73,16 @@ class Runner:
             self.competition_config = yaml.safe_load(f)
         self.is_fa_comp = self.competition_config.get("final_answer", True)
         self.is_lean_comp = self.competition_config.get("lean", False)
+        lean_task = self.competition_config.get("lean_task")
+        if lean_task not in {None, "prove_or_disprove"}:
+            raise ValueError("Unsupported lean_task; omit for legacy proof-only grading")
+        if lean_task == "prove_or_disprove":
+            from matharena.lean_conjecture import ENVIRONMENT, runtime_identity
+
+            if not self.is_lean_comp or self.competition_config.get("lean_environment") != ENVIRONMENT:
+                raise ValueError(f"Conjecture competitions require {ENVIRONMENT}")
+            if runtime_identity() != self.competition_config.get("lean_project_identity"):
+                raise ValueError("Comparator runtime differs from the exported Lean/mathlib pin")
         grading = self.competition_config.get("grading", "parser")
         if grading not in {"parser", "answer_judge"}:
             raise ValueError("Competition 'grading' must be 'parser' or 'answer_judge'.")
@@ -354,17 +368,24 @@ class Runner:
             "lean_environment_override",
             self.competition_config.get("lean_environment", None),
         )
+
+        def verify_complete_submission(code, formal_statement, messages=None):
+            if self.competition_config.get("lean_task") == "prove_or_disprove":
+                from matharena.lean_conjecture import check_submission
+
+                return json.dumps(check_submission(
+                    code, formal_statement, environment=lean_version,
+                    expected_runtime=self.competition_config.get("lean_project_identity"),
+                ))
+            return verify_lean_with_formal_statement(code, formal_statement, lean_version, messages=messages)
+
         POSSIBLE_TOOL_FUNCTIONS = {
             "execute_code": execute_code,
             "execute_python_code": execute_python_code,
             "verify_lean": lambda code, messages=None: verify_lean(
                 code, lean_version, messages=messages
             ),
-            "verify_submission": lambda code,
-            formal_statement,
-            messages=None: verify_lean_with_formal_statement(
-                code, formal_statement, lean_version, messages=messages
-            ),
+            "verify_submission": verify_complete_submission,
             "add_to_file": lambda code, messages=None: add_to_file(
                 code, lean_version, messages=messages
             ),
@@ -499,6 +520,7 @@ class Runner:
                 default_prompt_template,
                 default_api_client_args,
                 last_chance_prompt,
+                container_runtime=getattr(self, "container_runtime", "docker"),
             )
         if solver_config["type"] == "pure_model":
             if default_api_client_args.get("api") == "aristotle":
@@ -613,6 +635,7 @@ class Runner:
             default_api_client_args["competition"] = self.comp_name
             default_api_client_args["solver_name"] = solver_name
             default_api_client_args["is_lean_comp"] = self.is_lean_comp
+            default_api_client_args["lean_task"] = self.competition_config.get("lean_task")
             default_api_client_args["lean_environment"] = self.competition_config.get(
                 "lean_environment"
             )
@@ -720,10 +743,17 @@ class Runner:
             problem_runs = all_runs[problem_idx]
             debug_info = f"{solver_name} @ P{problem_idx} (ridx={solver_response.idx})"
             logger.info(f"[{debug_info}] Received a solver response, analyzing...")
+            if solver_response.detailed_cost.get("request_failed"):
+                logger.error(f"[{debug_info}] API request failed after retries; leaving the run pending.")
+                continue
             output_tokens = solver_response.detailed_cost.get("output_tokens", 0)
             try:
                 # For FA: If strict parsing finds no answer give the model one last chance to format correctly
-                if self.is_fa_comp and not self.uses_answer_judge and not run_limit_exceeded(solver_response.detailed_cost):
+                if (
+                    self.is_fa_comp and not self.uses_answer_judge
+                    and not run_limit_exceeded(solver_response.detailed_cost)
+                    and solver_response.detailed_cost.get("refusal_category") != "reasoning_extraction"
+                ):
                     try:
                         clean_conversation = normalize_conversation(
                             solver_response.conversation
@@ -758,6 +788,9 @@ class Runner:
                             "No valid answer found, reprompting the model to report the final answer (last chance)."
                         )
                         solver_response = solver.last_chance(solver_response)
+                        if solver_response.detailed_cost.get("request_failed"):
+                            logger.error(f"[{debug_info}] Last-chance API request failed; leaving the run pending.")
+                            continue
                         patched_conversation = ensure_final_response_message(
                             solver_response.conversation
                         )
@@ -778,7 +811,10 @@ class Runner:
                 problem = next(
                     p for p in self.problems if p["problem_idx"] == problem_idx
                 )
-                if run_limit_exceeded(solver_response.detailed_cost):
+                if (
+                    solver_response.detailed_cost.get("refusal_category") == "reasoning_extraction"
+                    or run_limit_exceeded(solver_response.detailed_cost)
+                ):
                     grader_response = (None, False, 0)
                 elif not self.is_auto_graded_comp:
                     grader_response = (

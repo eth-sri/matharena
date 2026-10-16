@@ -1,0 +1,33 @@
+model: qwen/qwen3.8-2.4t-a95b
+api: openrouter
+harness: qwen
+harness_version: "0.24.0"
+harness_config:
+  auth: api
+  container_executable: qwen
+  environment:
+    QWEN_STREAM_MAX_LIFETIME_MS: "0"
+max_tokens: 131072
+temperature: 1.0
+top_p: 0.95
+concurrent_requests: 16
+reasoning_effort: max
+cache_read_cost: 0.25
+read_cost: 2
+write_cost: 6
+human_readable_id: Qwen3.8-2.4T-A95B
+date: "2026-08-12"
+extra_body:
+  provider:
+    only:
+    - novita
+    allow_fallbacks: false
+    require_parameters: true
+    zdr: true
+  top_k: 20
+other_params:
+  open: true
+  creator: Qwen
+  parameters: 2400
+  active_parameters: 95
+  huggingface_id: Qwen/Qwen3.8-2.4T-A95B

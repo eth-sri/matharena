@@ -8,23 +8,27 @@ other_params:
   active_parameters: 18
   huggingface_id: zai-org/GLM-5.3-Flash
 
-# Kimi Code supplies the agent loop; GLM_API_KEY pays for Z.AI API usage.
+# Kimi Code supplies the agent loop; OPENROUTER_API_KEY pays for API usage.
 harness: kimi
 harness_version: "0.36.0"
-model: glm-5.3-flash
-api: glm
+model: z-ai/glm-5.3-flash
+api: openrouter
 max_tokens: 131072
 temperature: 1.0
 top_p: 0.95
 reasoning_effort: max
 extra_body:
+  provider:
+    only:
+    - z-ai
+    allow_fallbacks: false
   thinking:
     type: enabled
     clear_thinking: false
-# Promotional Z.AI prices through 2026-09-09 16:00 UTC.
-cache_read_cost: 0.015
-read_cost: 0.075
-write_cost: 0.25
+# Z.ai pricing through OpenRouter (USD per million tokens).
+cache_read_cost: 0.03
+read_cost: 0.15
+write_cost: 0.50
 concurrent_requests: 16
 
 harness_config:

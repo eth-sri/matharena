@@ -262,7 +262,7 @@ class Runs:
 
     def update_aggregates(self):
         for i, cost in enumerate(self.detailed_costs):
-            if run_limit_exceeded(cost):
+            if run_limit_exceeded(cost) or cost.get("refusal_category") == "reasoning_extraction":
                 self.correct[i] = False
         self.N = len(self.messages)
         self.cost = {}

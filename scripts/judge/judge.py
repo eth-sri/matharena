@@ -9,6 +9,7 @@ from datasets import load_dataset
 from dotenv import load_dotenv
 from loguru import logger
 
+from matharena.container_runtime import add_container_runtime_argument
 from matharena.json_zst import OUTPUT_JSON_SUFFIX, dump_json_zst, load_json_zst, output_json_stem
 from matharena.solvers.judges import JudgePool
 from matharena.tools.code_execution import execute_code
@@ -137,7 +138,9 @@ def recompute_correct_and_pass_at_1(run_data):
     correct = []
     for i in range(n):
         costs = run_data.get("detailed_costs", [])
-        if i < len(costs) and run_limit_exceeded(costs[i]):
+        if i < len(costs) and (
+            run_limit_exceeded(costs[i]) or costs[i].get("refusal_category") == "reasoning_extraction"
+        ):
             correct.append(0)
             continue
         vals = []
@@ -172,6 +175,7 @@ def main():
     parser.add_argument("--comp-configs-dir", type=str, default="configs/competitions")
     parser.add_argument("--model-configs-dir", type=str, default="configs/models")
     parser.add_argument("--configs-dir", type=str, default="configs")
+    add_container_runtime_argument(parser)
     args = parser.parse_args()
 
     with open(f"{args.comp_configs_dir}/{args.comp}.yaml", "r", encoding="utf-8") as f:
@@ -213,7 +217,8 @@ def main():
 
         judge_cfg["judge_points_max"] = judge_points_max
         judge_pool = JudgePool(
-            solver_config=judge_cfg
+            solver_config=judge_cfg,
+            container_runtime=args.container_runtime,
         )
 
         queries = []
@@ -253,7 +258,10 @@ def main():
             problem_text = run_data.get("problem")
             for run_idx, conversation in enumerate(run_data.get("messages", [])):
                 costs = run_data.get("detailed_costs", [])
-                if run_idx < len(costs) and run_limit_exceeded(costs[run_idx]):
+                if run_idx < len(costs) and (
+                    run_limit_exceeded(costs[run_idx])
+                    or costs[run_idx].get("refusal_category") == "reasoning_extraction"
+                ):
                     recompute_correct_and_pass_at_1(run_data)
                     dump_json_zst(run_data, path, indent=4, ensure_ascii=False)
                     continue

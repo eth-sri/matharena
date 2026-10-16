@@ -1,37 +1,37 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="color-scheme" content="only light">
-    <title>{{ title }}</title>
+    <meta name="color-scheme" content="light">
+    <title>{% block title %}{{ title }}{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/default.min.css">
 </head>
 <body>
-    <div style="display: flex; width: 100%; max-width: 2000px;">
-        <div class="sidebar" id="sidebar">
-            <button class="sidebar-toggle-button" id="sidebar-toggle-button" onclick="toggleSidebar()">
-                &times;
-            </button>
-            <div class="sidebar-content">
-                <select id="comp-dropdown" class="sidebar-item" name="comp-dropdown">
-                    {% for comp in sidebar.dropdown.all_comps %}
-                        <option value="{{ comp }}" {% if comp == sidebar.dropdown.current_comp %}selected{% endif %}>{{ comp }}</option>
-                    {% endfor %}
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <div class="app-shell">
+        <aside class="sidebar" id="sidebar" aria-label="Competition navigation">
+            <button type="button" class="mobile-nav-close icon-button" onclick="toggleSidebar()" aria-label="Close navigation">×</button>
+            <div class="competition-picker">
+                <label class="sr-only" for="comp-dropdown">Competition</label>
+                <select id="comp-dropdown" name="comp-dropdown">
+                    {% if sidebar.dropdown.current_comp not in sidebar.dropdown.all_comps %}<option selected>{{ sidebar.dropdown.current_comp }}</option>{% endif %}
+                    {% for comp in sidebar.dropdown.all_comps %}<option value="{{ comp }}" {% if comp == sidebar.dropdown.current_comp %}selected{% endif %}>{{ comp }}</option>{% endfor %}
                 </select>
-                <a href="{{ sidebar.reload_url }}" class="sidebar-main-button">Reload All Data</a>
-                <a href="{{ url_for('index') }}" class="sidebar-main-button">Home</a>
-                {% block sidebar %}{% endblock %}
             </div>
-            
-        </div>
-        <div class="main" id="main-content">
-            {% block content %}{% endblock %}
+            <nav class="primary-nav" aria-label="Main">
+                <a href="{{ url_for('index') }}" class="nav-link {% if request.endpoint == 'index' %}current{% endif %}" {% if request.endpoint == 'index' %}aria-current="page"{% endif %}><span aria-hidden="true">≡</span> Leaderboard</a>
+                <a href="{{ sidebar.reload_url }}" class="nav-link reload-link"><span aria-hidden="true">↻</span> Reload data</a>
+            </nav>
+            <nav class="sidebar-content" aria-label="{% block sidebar_nav_label %}Results{% endblock %}">{% block sidebar %}{% endblock %}</nav>
+        </aside>
+        <button class="nav-backdrop" onclick="toggleSidebar()" aria-label="Close navigation" tabindex="-1"></button>
+        <div class="workspace">
+
+            <main class="main" id="main-content" tabindex="-1"><button type="button" class="icon-button nav-toggle" id="sidebar-toggle-button" onclick="toggleSidebar()" aria-label="Toggle navigation" aria-controls="sidebar" aria-expanded="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>{% block content %}{% endblock %}</main>
         </div>
     </div>
-
     <script id="HighlightJS" src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
@@ -43,5 +43,4 @@
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
     integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"></script>
 </body>
-
 </html>

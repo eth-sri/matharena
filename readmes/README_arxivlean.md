@@ -1,3 +1,5 @@
+For September 2026, use the [Lean 4.34.1 evaluation setup](README_arxivlean_september_evaluation.md). The instructions below apply to the earlier proof-only editions.
+
 ## Axle API Key
 Make sure to get an API key from [Axle](https://axle.axiommath.ai/) and set it as an environment variable:
 

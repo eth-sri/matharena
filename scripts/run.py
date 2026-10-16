@@ -6,6 +6,7 @@ from loguru import logger
 
 
 from matharena.request_logger import request_logger
+from matharena.container_runtime import add_container_runtime_argument
 from matharena.runner import Runner
 from matharena.solvers import PureModelSolver, SolverResponse
 
@@ -98,6 +99,7 @@ if __name__ == "__main__":
     parser.add_argument("--comp-configs-dir", type=str, default="configs/competitions")
     parser.add_argument("--model-configs-dir", type=str, default="configs/models")
     parser.add_argument("--output-dir", type=str, default="outputs")
+    add_container_runtime_argument(parser)
     args = parser.parse_args()
 
     comp_n_overrides = {}
@@ -122,6 +124,7 @@ if __name__ == "__main__":
             args.model_configs_dir,
             args.output_dir,
             args.redo_all,
+            container_runtime=args.container_runtime,
         )
         for comp in args.comp
     ]

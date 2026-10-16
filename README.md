@@ -56,7 +56,7 @@ Execute the following command to evaluate a model on a competition:
 ```bash
 uv run python scripts/run.py --comp path/to/competition --models path/to/model1
 ```
-- `path/to/competition`: Relative path from the `configs/competition` folder to the competition config file (excluding the `.yaml` extension).
+- `path/to/competition`: Relative path from the `configs/competitions` folder to the competition config file (excluding the `.yaml` extension).
 - `path/to/model1`: Relative path (or multiple) from the `configs/models` folder to the model config file (excluding the `.yaml` extension). See [Adding a Model/Agent](#adding-a-model) below for model config file structure.
 
 The scripts `run_all_fa.sh` and `run_all_kangaroo.sh` provide convenient shortcuts to run a model on all current non-deprecated competitions. They can be executed as follows:
@@ -64,7 +64,7 @@ The scripts `run_all_fa.sh` and `run_all_kangaroo.sh` provide convenient shortcu
 bash scripts/run_all_fa.sh path/to/model
 ```
 
-Importantly, for ArXivLean, make sure to follow [the setup instructions](readmes/README_arxivlean.md) below before running the evaluation.
+For ArXivLean September, follow the [Lean 4.34.1 setup instructions](readmes/README_arxivlean_september_evaluation.md) before running the evaluation. Earlier editions use the [legacy setup instructions](readmes/README_arxivlean.md).
 
 **Example:**
 ```bash
@@ -75,17 +75,27 @@ uv run python scripts/run.py --comp aime/aime_2025 --models openai/gpt-4o
 - `--n`: Number of runs per problem (default: 4).
 - `--redo-all`: Ignore existing runs for this model and rerun everything (default: false, continues from existing runs found in `outputs/`).
 - `--problems`: One-based indices of problems to run (default: runs all problems).
+- `--container-runtime docker|podman`: Container backend for harness runs and judging (default: Docker). Docker and Podman use separate image and cache stores.
+
+For rootless Podman, build the runtime in Podman’s storage and select that backend when running:
+
+```bash
+bash scripts/build_harness_arxivlean_image.sh --container-runtime podman
+uv run python scripts/run.py --comp arxiv/september --models openai/gpt-61-sol --container-runtime podman --n 1
+```
+
+September’s ArXivMath and BrokenArXiv harness configurations allow 12 hours and $100 per attempt, followed by a five-minute final-answer grace period at the dollar limit. ArXivLean September sets a $100 per-attempt limit and no overall time limit. Costs are estimates from token usage and the model config’s prices; an in-flight request and the configured grace period can exceed the nominal dollar limit.
 
 ### Current Website Competitions
 The table below maps all non-deprecated competitions currently shown on the website to their competition config. `Requires judging` indicates whether the config requires a separate `scripts/judge/judge.py` pass.
 
 | Website section | Website competition | Competition config | Requires judging |
 | --- | --- | --- | --- |
-| BrokenArxiv | 02/2026 | `arxiv_false/february.yaml` | Yes |
-| BrokenArxiv | 03/2026 | `arxiv_false/march.yaml` | Yes |
-| ArXivMath | 01/2026 | `arxiv/january.yaml` | No |
-| ArXivMath | 02/2026 | `arxiv/february.yaml` | No |
-| ArXivMath | 03/2026 | `arxiv/march.yaml` | No |
+| ArXivMath | 08/2026 | `arxiv/august.yaml` | Yes |
+| ArXivMath | 09/2026 | `arxiv/september.yaml` | Yes |
+| BrokenArxiv | 08/2026 | `arxiv_false/august.yaml` | Yes |
+| BrokenArxiv | 09/2026 | `arxiv_false/september.yaml` | Yes |
+| ArXivLean | 09/2026 | `arxivlean/september.yaml` | No (Lean comparator) |
 | Visual Math | Kangaroo 2025 1-2 | `kangaroo/kangaroo_2025_1-2.yaml` | No |
 | Visual Math | Kangaroo 2025 3-4 | `kangaroo/kangaroo_2025_3-4.yaml` | No |
 | Visual Math | Kangaroo 2025 5-6 | `kangaroo/kangaroo_2025_5-6.yaml` | No |
@@ -103,6 +113,16 @@ The table below maps all non-deprecated competitions currently shown on the webs
 | Proof-Based Comps | Putnam 2025 | `putnam/putnam_2025.yaml` | Yes |
 | Proof-Based Comps | USAMO 2026 | `usamo/usamo_2026.yaml` | Yes |
 | Project Euler | Project Euler | `euler/euler.yaml` | No |
+
+The September editions each contain 53 problems and load directly from Hugging Face:
+[ArXivMath](https://huggingface.co/datasets/MathArena/arxivmath-0926),
+[BrokenArXiv](https://huggingface.co/datasets/MathArena/brokenarxiv-0926), and
+[ArXivLean](https://huggingface.co/datasets/MathArena/arxivlean-0926).
+Saved model outputs are published in the corresponding
+[ArXivMath](https://huggingface.co/datasets/MathArena/arxivmath-0926_outputs),
+[BrokenArXiv](https://huggingface.co/datasets/MathArena/brokenarxiv-0926_outputs), and
+[ArXivLean](https://huggingface.co/datasets/MathArena/arxivlean-0926_outputs) output datasets.
+Older competition configs remain available for reproducing earlier evaluations.
 
 Note: Since we do not publish the correct answers for Project Euler problems, they cannot be directly judged as correct or incorrect without adapting `data/euler/euler/answers.csv` with the correct answers.
 Putnam, IMC, IMO 2025, USAMO 2025, Miklos Schweitzer 2025 were graded using human verification. They can therefore not be graded automatically. For these competitions, if you want to run them, you will have to adjust their config similar to the USAMO 2026 competition.
@@ -151,12 +171,18 @@ To add a new model add a config file in the `configs/models` folder. Each config
   - `read_cost` & `write_cost`: Cost per million tokens in USD for input and output tokens (default: 1 each).
   - `cache_read_cost`: Cost per million cached input tokens in USD (default: same as `read_cost`).
   - `date`: Release date of the model in the format "yyyy-mm-dd".
-  - `batch_processing`: If set to true, the model will be queried using batch processing. Only available for OpenAI and Anthropic models.
+  - `batch_processing`: If set to true, the model will be queried using batch processing. Available for OpenAI, Anthropic, and OpenRouter models.
   - `use_openai_responses_api`: If set to true, will use the OpenAI responses API (instead of chat completions).
-  - `harness`: Run the model through `codex`, `claude`, `kimi`, `gemini`, `qwen`, or `opencode`; requires the competition to opt in with `allow_harness: true`. Set it to `false` to opt out of a competition default.
+  - `harness`: Run the model through `codex`, `claude`, `kimi`, `gravity`, `qwen`, `opencode`, `deepcode`, `grok`, `muse`, or `vibe`; requires the competition to opt in with `allow_harness: true`. Set it to `false` to opt out of a competition default.
   - `harness_version`: Optional exact CLI version; defaults to the latest release resolved at run startup.
   - `harness_config`: Docker image, resource limits, workspace, and harness authentication settings. Harness runs use minimal reproducible CLI context by default; set `minimal_context: false` only to restore a CLI's native skills and instructions.
   - Other model/provider specific parameters (`config`, `provider`, `reasoning`, etc.).
+
+New model profiles include `openai/gpt-61-sol`, `anthropic/opus_55_high`,
+`qwen/qwen3.8_max`, `deepseek/deepseek_v41_flash`, `xai/grok-47`,
+`mistral/mistral_large_4`, and `gemini/gemini-4-argon`. The Argon profile uses
+Google API authentication through Antigravity CLI; set `GOOGLE_API_KEY`.
+Each profile specifies its provider, harness version, reasoning settings, and token prices.
 
 See [Harness-backed model runs](readmes/README_harness.md) for configuration, API billing, isolation, and arXivLean tool integration details.
 

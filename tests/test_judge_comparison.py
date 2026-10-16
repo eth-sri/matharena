@@ -23,11 +23,16 @@ spec.loader.exec_module(comparison)
     ("judges/answer_judge", False, 1, 16),
     ("judges/arxiv_judge_gemini_38_flash", True, 3, 64),
 ])
-def test_comparison_keeps_codex_and_original_tool_policy(monkeypatch, judge_ref, tools, scale, threads):
+@pytest.mark.parametrize("runtime", ["docker", "podman"])
+def test_comparison_keeps_codex_and_original_tool_policy(monkeypatch, judge_ref, tools, scale, threads, runtime):
     captured = []
-    monkeypatch.setattr("matharena.solvers.judges.simple_judge.HarnessSolver", lambda *args: captured.append(args) or object())
+    def capture(*args, **kwargs):
+        assert kwargs == {"container_runtime": runtime}
+        captured.append(args)
+        return object()
+    monkeypatch.setattr("matharena.solvers.judges.simple_judge.HarnessSolver", capture)
     config = comparison.comparison_config(judge_ref)
-    judge = SimpleJudge(0, 1, 0, config)
+    judge = SimpleJudge(0, 1, 0, config, container_runtime=runtime)
     assert judge.harness_solver is not None
     model = captured[0][2]
     assert model["harness"] == "codex"
@@ -39,7 +44,8 @@ def test_comparison_keeps_codex_and_original_tool_policy(monkeypatch, judge_ref,
     assert config["judge_prompt"].format(student_answer=prompt) == prompt
 
 
-def test_comparison_preserves_sources_replays_prompts_and_resumes(tmp_path, monkeypatch):
+@pytest.mark.parametrize("runtime", ["docker", "podman"])
+def test_comparison_preserves_sources_replays_prompts_and_resumes(tmp_path, monkeypatch, runtime):
     (tmp_path / "configs").symlink_to(ROOT / "configs", target_is_directory=True)
     monkeypatch.setattr(comparison, "ROOT", tmp_path)
     originals = {}
@@ -64,8 +70,9 @@ def test_comparison_preserves_sources_replays_prompts_and_resumes(tmp_path, monk
 
     calls, pacers = [], []
     class FakePool:
-        def __init__(self, solver_config):
+        def __init__(self, solver_config, *, container_runtime):
             self.config = solver_config
+            assert container_runtime == runtime
 
         def solve_batch(self, queries, problem_indices, run_indices):
             assert openai_bridge._wait_for_connection is not None
@@ -81,7 +88,9 @@ def test_comparison_preserves_sources_replays_prompts_and_resumes(tmp_path, monk
 
     monkeypatch.setattr(comparison, "JudgePool", FakePool)
     output = tmp_path / "logs/comparison"
-    monkeypatch.setattr(sys, "argv", ["compare_judges.py", "--run", "--output-dir", str(output)])
+    monkeypatch.setattr(sys, "argv", [
+        "compare_judges.py", "--run", "--output-dir", str(output), "--container-runtime", runtime,
+    ])
     comparison.main()
     comparison.main()
     assert calls == [1, 3]  # The resumed run makes no further judge requests.

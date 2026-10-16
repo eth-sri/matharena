@@ -12,8 +12,8 @@ from matharena.tools.code_execution import execute_code
 
 
 class SimpleJudge(BaseJudge):
-    def __init__(self, batch_idx, problem_idx, run_idx, solver_config):
-        super().__init__(batch_idx, problem_idx, run_idx, solver_config)
+    def __init__(self, batch_idx, problem_idx, run_idx, solver_config, *, container_runtime="docker"):
+        super().__init__(batch_idx, problem_idx, run_idx, solver_config, container_runtime=container_runtime)
         model_config = deepcopy(self.solver_config["model_config"])
         for key in self.solver_config.get("api_client_remove_keys", []):
             model_config.pop(key, None)
@@ -27,7 +27,9 @@ class SimpleJudge(BaseJudge):
                 "workspace_root", str(log_root / "judges" / uuid4().hex / "p{problem_idx}_r{run_idx}")
             )
             harness_config.setdefault("auto_fallback", False)
-            self.harness_solver = HarnessSolver({}, "{problem}", model_config, "")
+            self.harness_solver = HarnessSolver(
+                {}, "{problem}", model_config, "", container_runtime=self.container_runtime,
+            )
             return
 
         tools = []

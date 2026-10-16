@@ -1,6 +1,7 @@
 model: qwen/qwen3.8-max
 api: openrouter
 harness: qwen
+harness_version: "0.24.0"
 harness_config:
   auth: api
   container_executable: qwen

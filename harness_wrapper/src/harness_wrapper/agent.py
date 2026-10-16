@@ -120,6 +120,41 @@ def _safe_provider_error(value: Any) -> dict[str, Any]:
     return result
 
 
+def _model_request_succeeded(payload: Mapping[str, Any]) -> bool:
+    """Recognize provider completions, excluding partial and token-limited output."""
+
+    if payload.get("error") is not None:
+        return False
+    kind = payload.get("type")
+    if kind in ("error", "response.failed", "response.incomplete"):
+        return False
+    if kind == "response.completed" or payload.get("object") == "response":
+        response = payload.get("response", payload)
+        default_status = "completed" if kind == "response.completed" else None
+        return (
+            isinstance(response, Mapping)
+            and response.get("error") is None
+            and response.get("status", default_status) == "completed"
+        )
+    choices = payload.get("choices")
+    if isinstance(choices, list) and any(
+        isinstance(choice, Mapping)
+        and choice.get("finish_reason") in ("stop", "tool_calls", "function_call")
+        for choice in choices
+    ):
+        return True
+    if kind in ("message", "message_delta"):
+        message = payload.get("delta", {}) if kind == "message_delta" else payload
+        return isinstance(message, Mapping) and message.get("stop_reason") in (
+            "end_turn", "tool_use", "stop_sequence",
+        )
+    candidates = payload.get("candidates")
+    return isinstance(candidates, list) and any(
+        isinstance(candidate, Mapping) and candidate.get("finishReason") == "STOP"
+        for candidate in candidates
+    )
+
+
 class OutputTokenLimitError(CLIProcessError):
     """A native turn exhausted its generation allowance, not its connection retries."""
 
@@ -177,7 +212,9 @@ class Agent(ABC):
             "harness_wrapper.harnesses.qwen_code",
             "harness_wrapper.harnesses.opencode",
             "harness_wrapper.harnesses.deepcode",
+            "harness_wrapper.harnesses.grok_build",
             "harness_wrapper.harnesses.muse_code",
+            "harness_wrapper.harnesses.mistral_vibe",
         ):
             importlib.import_module(module)
 
@@ -214,7 +251,7 @@ class Agent(ABC):
         auto_fallback: bool = True,
         rate_limit_timeout: float | None = None,
         rate_limit_poll_interval: float = 30.0,
-        max_recovery_attempts: int = 3,
+        max_recovery_attempts: int = 10,
         type: str | None = None,
         harness: str | None = None,
         **_: Any,
@@ -270,6 +307,7 @@ class Agent(ABC):
         self._captured_prompt_lock = threading.Lock()
         self._captured_prompts: set[str] = set()
         self._captured_reasoning: set[str] = set()
+        self._successful_model_requests = 0  # Guarded by _activity_lock.
         self._last_activity_at: datetime | None = None
         self._session_id: str | None = None
         self._interrupted_process: Any | None = None
@@ -453,6 +491,22 @@ class Agent(ABC):
             if accepted in {str(getattr(value, "value", value)) for value in values}:
                 return accepted
         return self.accepted_api_types[0] if self.accepted_api_types else None
+
+    @property
+    def internet_enabled(self) -> bool:
+        """Enable web tools only for an explicitly networked environment."""
+        return bool(self.env is not None and getattr(self.env, "network_enabled", False))
+
+    def network_instructions(self, offline_prompt: str) -> str:
+        if not self.internet_enabled:
+            return offline_prompt
+        return "Use the available file, shell, and web tools. Internet access is enabled."
+
+    @property
+    def _offline_models(self) -> frozenset[str]:
+        if self.env is not None and not self.env.network_enabled:
+            return frozenset({self.model_name})
+        return frozenset()
 
     @contextmanager
     def _host_service_route(self) -> Iterator[HostServiceRoute]:
@@ -748,6 +802,8 @@ class Agent(ABC):
         while True:
             if self._turn_cancelled or (self._should_stop is not None and self._should_stop()):
                 return
+            with self._activity_lock:
+                successful_requests_before_turn = self._successful_model_requests
             turn_emitted_event = False
             try:
                 if not runtime_prepared:
@@ -768,6 +824,17 @@ class Agent(ABC):
             except Exception as exception:
                 if self._turn_cancelled or (self._should_stop is not None and self._should_stop()):
                     return
+                with self._activity_lock:
+                    made_progress = self._successful_model_requests > successful_requests_before_turn
+                if made_progress:
+                    # A resumed CLI can make many successful requests before
+                    # failing again. Only fresh provider completions reset the
+                    # allowance; replayed native messages/usage never do.
+                    if attempts:
+                        bound_logger.info(
+                            "Resetting harness recovery attempts after a successful model request"
+                        )
+                    attempts = 0
                 error = (
                     exception if isinstance(exception, CLIProcessError) else CLIProcessError(
                         [self.executable], 1, f"{type(exception).__name__}: {exception}"
@@ -1197,6 +1264,9 @@ class Agent(ABC):
     def _capture_model_response(self, path: str, payload: Mapping[str, Any]) -> None:
         """Record plaintext or recoverable reasoning returned by a provider."""
 
+        if _model_request_succeeded(payload):
+            with self._activity_lock:
+                self._successful_model_requests += 1
         if self._on_model_response is not None:
             self._on_model_response(path, payload)
         provider_error = payload.get("error")

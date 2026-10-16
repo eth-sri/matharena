@@ -11,7 +11,8 @@ configuration cannot silently turn an ordinary evaluation into an agentic one.
 - Set competition `default_harness: false` to require an explicit model `harness`
   setting instead. A harness name can select a different competition default.
 - A model can select `harness: codex`, `harness: claude`, `harness: kimi`,
-  `harness: gravity`, `harness: qwen`, `harness: opencode`, `harness: deepcode`, or `harness: muse`.
+  `harness: gravity`, `harness: qwen`, `harness: opencode`, `harness: deepcode`, `harness: grok`,
+  `harness: muse`, or `harness: vibe`.
 - A model can set `harness: false` to opt out of a competition's default harness.
 - With `allow_harness: false` (or absent), a requested harness is ignored with a warning.
   Every model uses its normal API path, including models requesting Codex. CLI version
@@ -92,6 +93,110 @@ Gemini here. Supporting them requires more than a model config. Google's
 [OpenAI compatibility documentation](https://ai.google.dev/gemini-api/docs/openai)
 describes the Chat Completions endpoint used by Kimi.
 
+## Grok 4.7 through OpenRouter and Grok Build
+
+`xai/grok-47` uses `x-ai/grok-4.7` with `OPENROUTER_API_KEY`, xAI-only routing,
+`xhigh` reasoning, and a 450,000-token output ceiling. For Grok Build this ceiling
+is adaptive: on an explicit OpenRouter context-overflow HTTP 400, the proxy uses
+the reported text/tool input counts to reserve 8,192 tokens of headroom and retries
+the same request once with a smaller output allowance. That allowance is retained
+for later calls and can shrink again as history grows. The input, encrypted reasoning,
+tools, and native compaction remain intact; unrelated errors keep native retry handling.
+A prompt that itself fills the context window is not fixed by reducing output.
+Temperature and top-p are
+omitted so the provider supplies its defaults. Both the normal API path and
+Grok Build use OpenRouter's Responses endpoint with `store: false`. The config
+pins Grok Build 1.0.40
+and a 500,000-token context window for harness-enabled competitions.
+
+May and June use the normal API path and do not install or launch a harness:
+
+```sh
+uv run python scripts/run.py --comp arxiv/may --models xai/grok-47
+uv run python scripts/run.py --comp arxiv/june --models xai/grok-47
+```
+
+August and `arxivlean/june` select the native Grok Build harness automatically:
+
+```sh
+uv run python scripts/run.py --comp arxiv/august --models xai/grok-47 --n 1
+```
+
+The host downloads the versioned official CLI and verifies its reported version.
+No shared-image rebuild is required. Headless sessions use a private Grok home,
+file-based prompts, streaming JSON, and native `--resume`. Grok sends full history
+on tool continuations and resume, as required by OpenRouter's stateless Responses
+API. Native Grok inference retries are preserved, including retries of
+reasoning-only responses. The existing Docker
+boundary provides filesystem and network isolation; Grok's nested sandbox is off.
+The real API key remains in the host proxy. Minimal mode permits local terminal,
+file, search, and todo tools; the proxy enforces this even when Grok's own tool
+filter retains extra tools. Provider usage includes auxiliary title requests,
+reasoning, and cached input, without double-counting native usage events.
+
+The configured reporting prices are OpenRouter's standard base rates, verified
+2026-09-21. OpenRouter doubles these rates at 200,000 prompt tokens; MathArena's
+static cost estimates do not currently represent that tier.
+
+See [Grok Build's headless reference](https://docs.x.ai/build/cli/headless-scripting)
+and [custom-model settings](https://docs.x.ai/build/settings/reference).
+
+## Mistral Large 4 through Mistral Vibe
+
+`mistral/mistral_large_4` runs `mistralai/mistral-large-4-0` through
+[Mistral Vibe](https://github.com/mistralai/mistral-vibe), Mistral's own coding-agent CLI,
+pinned to 2.26.1 (`harness: vibe`; aliases `vibe-cli`, `mistral-vibe`, `mistral`).
+It uses `OPENROUTER_API_KEY` with Mistral-only routing, the same endpoint and pricing as the
+API path of the same config. Large 4 offers only `none` and `high` reasoning;
+`high` is its maximum. Vibe always sends a temperature (0.2 unless configured), so the
+proxy drops it and Mistral's model default (1.0) applies, matching the API config. Set
+`temperature` in a model config to send one explicitly. `max_tokens: 262144` is OpenRouter's
+output ceiling for this endpoint and is added by the proxy, since Vibe sends none.
+
+August uses the harness automatically; May and June use the normal API path:
+
+```sh
+uv run python scripts/run.py --comp arxiv/august --models mistral/mistral_large_4 --n 1
+uv run python scripts/judge/judge.py --comp arxiv/august --models mistral/mistral_large_4
+uv run python scripts/run.py --comp arxiv_false/august --models mistral/mistral_large_4 --n 1
+uv run python scripts/judge/judge.py --comp arxiv_false/august --models mistral/mistral_large_4
+```
+
+The managed installer downloads Mistral's standalone PyInstaller build
+(`vibe-linux-x86_64-<version>.zip`) from the GitHub release, verifies the release's SHA-256
+digest, checks `vibe --version`, and mounts it read-only; no image rebuild is required. The
+bundle carries its own Python 3.12 and the native Unified Harness runtime and needs glibc 2.28.
+
+Sessions use `vibe -p` with the prompt on stdin, `--output streaming`, `--auto-approve`,
+`--trust`, a private `VIBE_HOME`, and `VIBE_CLI=python` (the Rust CLI rejects `--resume`
+together with `-p`). Retries and the final-answer reprompt use `--resume <session id>`;
+the replayed history is deduplicated. Telemetry, experiments, update checks, connectors,
+subagents, project context, and session titles are off, so a turn makes only model requests.
+Background processes stay enabled because `bash` calls time out after 300 seconds.
+Vibe's `bash` tool starts a login shell, whose `/etc/profile` replaces the sandbox `PATH`, and
+inherits the PyInstaller bundle's `LD_LIBRARY_PATH`, which breaks SciPy and Sage
+(`GLIBCXX_3.4.26 not found`). A private `~/.bash_profile` restores both, so commands use the
+image's Python venv, Sage, Lean, and Node like the other harnesses.
+
+Minimal mode replaces Vibe's system prompt and limits the offered tools to `bash`,
+`read_file`, `write_file`, `edit`, and `todo`. Vibe's Unified Harness always adds
+`search_tool_functions`, `run_typescript` (an embedded TypeScript runtime that can start
+subagents and processes), `cron`, and a scratchpad; the proxy removes them and rejects
+non-Chat-Completions endpoints. Filtering errors fail closed.
+
+Vibe's programmatic output contains no token usage, so usage is counted from every proxied
+provider response, including cached input. Vibe replays OpenRouter's `reasoning` field on
+later turns. `model_context_window: 1048576` (Mistral's maximum) sets Vibe's compaction threshold to the window
+minus `max_tokens` minus 8,192 tokens, so the output allowance always fits beside history.
+
+Vibe 2.26 treats a mid-stream `finish_reason: "error"` as an ordinary finish, which would
+save a truncated reasoning trace as an empty final answer (about 3% of June API requests
+ended this way). The proxy withholds such an error event and ends the stream, so Vibe sees
+an incomplete stream and resends the request; Vibe retries for up to an hour after a
+request first starts. Later failures exit the CLI, and the wrapper resumes the session
+within `max_recovery_attempts`. Since 2.26.1, a response cut off at `max_tokens` exits 3
+instead of saving the truncated text, so it is resumed the same way.
+
 ## Meta Muse Code
 
 `meta/muse_spark_13` runs `muse-spark-1.3` through Muse Code, pinned to
@@ -117,10 +222,10 @@ normal Meta Responses API with a warning, preserving the configured reasoning
 and output allowance. Set `harness: false` to explicitly use the API.
 
 The managed installer downloads the pinned native binary, verifies Meta's checksum,
-and mounts it read-only into the shared Docker image; no image rebuild is needed.
+and mounts it read-only into the shared container image; no image rebuild is needed.
 New sessions use `muse exec --json`. Minimal context permits only local shell, file,
 search, and todo tools, disabling web tools, foreign personal context, and reminder
-agents. Docker provides the filesystem/network boundary. The real Meta key stays in
+agents. The container provides the filesystem/network boundary. The real Meta key stays in
 the host proxy; Muse receives a placeholder credential.
 
 Meta `server_error` failures inside HTTP-200 SSE responses retry the same request
@@ -202,6 +307,58 @@ Model ID, reasoning levels, and rates follow the
 The local catalog uses Codex's documented
 [model_catalog_json setting](https://learn.chatgpt.com/docs/config-file/config-reference).
 
+## Container runtime
+
+Docker is the default. Select native Linux Podman at execution time with
+`--container-runtime podman`; model configurations do not select the backend:
+
+```bash
+uv run python scripts/run.py --comp arxiv/august --models openai/gpt-6-astra --container-runtime podman
+uv run python scripts/judge/judge.py --comp arxiv/august --container-runtime podman
+bash scripts/run_all_fa.sh openai/gpt-6-astra --container-runtime podman
+```
+
+The same runtime image, model proxy, CLI cache, and resource limits are used by
+both runtimes. `container_image` and `container_extra_args` can customize the
+image and launch flags; existing `docker_image` and `docker_extra_args` settings
+remain supported for either runtime. The new keys take precedence when present.
+
+For local rootless Podman, MathArena defaults to `--userns keep-id` so the
+container's unprivileged UID/GID can write the host workspace. An explicit
+`harness_config.userns` overrides `MATHARENA_CONTAINER_USERNS`, which overrides
+that default. Rootful Podman does not add a user namespace by default. The host
+must support rootless user namespaces and delegated cgroup v2 CPU/memory limits.
+The existing proxy relay requires native Podman with Netavark and
+`podman unshare --rootless-netns`; remote Podman clients are not supported.
+
+Build the image and populate the Lean cache in Podman's storage before using it:
+
+```bash
+scripts/build_harness_arxivlean_image.sh --container-runtime podman
+```
+
+Docker and Podman have separate image/volume stores. Omitting the runtime option
+uses Docker. The build helper also retains its `MATHARENA_CONTAINER_RUNTIME`
+environment variable for compatibility; its command-line option takes precedence.
+
+Podman uses an internal bridge with a host-side model proxy and a relay for
+rootless networking. General network access remains controlled by
+`direct_network`; cancellation removes the named container and its child tools.
+The existing integration tests can target Podman without paid model requests:
+
+```bash
+MATHARENA_TEST_CONTAINER_RUNTIME=podman uv run pytest tests/test_harness_e2e.py -k 'container_sandbox or without_paid_credits'
+```
+
+The option is also available in judge comparison and the source-curation screening,
+investigation, and verification commands. `scripts/run_all_fa.sh`,
+`scripts/run_all_kangaroo.sh`, `scripts/run_euler.sh`, and the ArXivMath/BrokenArXiv
+creation workflows forward it to model evaluation or judging. The training evaluation
+wrapper `train/scripts/eval_arxiv_march_vllm.sh` forwards it too. Library callers can pass
+`container_runtime="podman"` to `Runner`, `HarnessSolver`, `JudgePool`, or
+`create_query_client`. Legacy `type: codex_cli` and the separate code-execution
+tools retain their Docker integration.
+
 ## Model and authentication configuration
 
 Codex subscription authentication is the default in the supplied Codex model config:
@@ -223,7 +380,7 @@ harness_config:
 
 Run `codex login --device-auth` on the trusted host first. The wrapper imports the saved
 native session into its mode-0600 host credential store, then exposes a Responses proxy on
-an invocation-local internal Docker network. Neither `~/.codex/auth.json` nor the real
+an invocation-local internal container network. Neither `~/.codex/auth.json` nor the real
 access or refresh token is mounted, copied, or placed in the container environment. Codex
 inside the container receives only a random one-time bearer capability for that proxy.
 Automatic interactive login and re-login are disabled so benchmark workers cannot stop on
@@ -281,7 +438,7 @@ reserved for workloads that genuinely need public network access.
 
 Codex's inner Bubblewrap command sandbox is disabled in the shared image because nested
 user and mount namespaces are blocked by the container boundary. Model-generated commands
-remain isolated by the outer Docker container: it runs as the host's unprivileged UID/GID,
+remain isolated by the outer container: it runs as the host's unprivileged UID/GID,
 drops all capabilities, enables `no-new-privs`, uses a read-only root filesystem and an
 internal-only network, and exposes only the per-problem workspace as writable.
 
@@ -304,7 +461,7 @@ The npm package is `@vegamo/deepcode-cli` and its executable is `deepcode`.
 Use `harness: deepcode` (aliases: `deepcode-cli`, `deep-code`). The existing
 `deepseek/deepseek_v4_flash` model config pins version `0.3.1`, uses `api: deepseek`
 and `DEEPSEEK_API_KEY`, and retains its max reasoning and generation settings.
-The shared Docker image already supplies the required Node.js 22 and scientific tools;
+The shared container image already supplies the required Node.js 22 and scientific tools;
 the managed installer mounts the pinned CLI from its private versioned cache.
 
 ```sh
@@ -325,7 +482,7 @@ Minimal mode disables telemetry, MCP, image uploads, and discovered/bundled skil
 Because the CLI has no tool allowlist flag, the proxy allows only `bash`, `read`, `write`,
 `edit`, and `UpdatePlan`, replaces the stock tool prompt, and rejects non-Chat-Completions
 endpoints. Filtering errors fail closed. Native permissions additionally deny network
-and MCP access, and Docker blocks public networking. The CLI's container-local runtime
+and MCP access, and the container blocks public networking. The CLI's container-local runtime
 metadata remains; no host skills or settings are mounted.
 
 ## Reproducible CLI context
@@ -349,8 +506,8 @@ at CLI invocation time:
   project-instruction, plugin, or base-prompt template variables.
 - Antigravity uses a fresh private home, disables slash expansion, and selects a custom agent
   whose declared tools are limited to local files, local search, and shell commands. Those
-  commands run inside MathArena's hardened outer Docker sandbox; the CLI's nested sandbox is
-  incompatible with Docker's `no_new_privs` boundary. The agent declares no skills, plugins,
+  commands run inside MathArena's hardened outer container sandbox; the CLI's nested sandbox is
+  incompatible with the container's `no_new_privs` boundary. The agent declares no skills, plugins,
   MCP servers, web tools, or subagents. The closed-source
   CLI still injects its built-in messaging/artifact instructions and current-time metadata;
   these cannot currently be disabled through documented headless flags.
@@ -372,7 +529,7 @@ The harness uses its native file and shell tools rather than MathArena function 
   only the fast iterative compilation check.
 - `loogle` and `lean_explore_search` are not automatically available inside a coding
   harness. The optimal extension is to install small same-named CLI adapters and their data
-  in the shared Docker image. This keeps the interface harness-neutral and avoids
+  in the shared container image. This keeps the interface harness-neutral and avoids
   provider-specific function-tool or MCP wiring.
 
 `Solution.lean` and `check.sh` are created in each problem workspace; the full problem is
@@ -415,7 +572,7 @@ export GLM_API_KEY=...
 uv run python scripts/run.py --comp arxivlean/june --models glm/glm-53-kimi --n 1
 ```
 
-The Docker integration test uses a local fake
+The container integration test uses a local fake
 OpenAI-compatible server and therefore spends no credits. Paid GLM and live subscription
 smokes are separately opt-in through `MATHARENA_RUN_PAID_HARNESS_E2E=1` and
 `MATHARENA_RUN_SUBSCRIPTION_E2E=1`. The final arXivLean comparator remains part of the
@@ -471,3 +628,7 @@ deadline, and whether it completed; `exceeded` is null for a successful final
 answer and records the failure otherwise. Interrupted usage remains flagged as
 potentially incomplete. Existing outputs are not retroactively changed, and
 running processes need a new launch to pick up these settings.
+
+
+Set `harness_config.direct_network: true` to enable shell networking and native web tools;
+it defaults to false.

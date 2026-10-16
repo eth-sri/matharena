@@ -20,6 +20,15 @@ if [[ -f "${TRAIN_ROOT}/configs/local.env" ]]; then
   set +a
 fi
 
+CONTAINER_RUNTIME=docker
+source "$REPO_ROOT/scripts/lib/container_runtime.sh"
+parse_container_runtime "$@"
+set -- "${CONTAINER_ARGS[@]}"
+if (( $# > 1 )); then
+  echo "Usage: $0 [COMPETITION] [--container-runtime docker|podman]" >&2
+  exit 2
+fi
+
 : "${SCRATCH:?SCRATCH must be set on CSCS}"
 
 export HF_HOME="${HF_HOME:-${SCRATCH}/huggingface}"
@@ -253,6 +262,7 @@ raise SystemExit(f"Timed out after {timeout}s waiting for vLLM at {url}. Last lo
 PY
 
 RUN_ARGS=(
+  --container-runtime "${CONTAINER_RUNTIME}"
   --comp "${EVAL_COMP}"
   --models "${EVAL_MODEL_CONFIG}"
   --n "${EVAL_N}"

@@ -1,0 +1,29 @@
+model: mistralai/mistral-large-4-0
+api: openrouter
+# Mistral Vibe supplies the agent loop; OPENROUTER_API_KEY pays for Mistral-only routing.
+harness: vibe
+harness_version: "2.26.1"
+harness_config:
+  auth: api
+  container_executable: vibe
+  model_context_window: 1048576
+max_tokens: 262144
+context_limit: 524288
+# Mistral exposes only none/high; Vibe's temperature is dropped so Mistral's default (1.0) applies.
+reasoning_effort: high
+concurrent_requests: 32
+read_cost: 1.36
+cache_read_cost: 0.14
+write_cost: 4.18
+extra_body:
+  provider:
+    allow_fallbacks: False
+    order:
+    - mistral
+human_readable_id: Mistral Large 4
+date: "2026-10-06"
+other_params:
+  open: false
+  creator: Mistral
+  parameters: 1050
+  active_parameters: 49

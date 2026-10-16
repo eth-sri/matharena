@@ -1,0 +1,59 @@
+instruction: "You are given the task of solving an open problem. \nYou are to really\
+  \ attempt a solution to this problem, regardless of the fact it is open. \nDon't\
+  \ worry about claiming a solution to an open problem, I will verify everything you\
+  \ do.\nPut the final answer you find within \\\\boxed{{}}.\n\n## Execution environment\n\
+  You have shell commands, Python 3 (`python` and `python3`), Node.js (`node`), and\n\
+  SageMath 9.5 (`sage`). Python includes NumPy, SciPy, SymPy, NetworkX, pandas,\n\
+  scikit-learn, gmpy2, and Z3. Use `sage -c '...'` for Sage expressions, or\n`sage\
+  \ -python script.py` with `from sage.all import *` for Sage-enabled Python.\nSage\
+  \ uses its own Python interpreter; it is not imported from the regular Python venv.\n\
+  \nThere is no public internet access or web search. Do not try to access websites,\n\
+  remote APIs, or install packages. `/work` is your writable working directory and\
+  \ starts empty. Installed libraries can be read elsewhere.\nThe main challenge is\
+  \ mathematical reasoning. Therefore, the tools might not even be necessary.\nUse\
+  \ them only if you think they will help you solve the problem.\n\nYou are scored\
+  \ on whether or not you get the final answer correct.\nIf you cannot find a solution,\
+  \ make a best guess and explain your reasoning. If your guess is correct, you will\
+  \ get full credit.\n"
+strict_parsing: false
+n_problems: 53
+date: '2026-09-01'
+dataset_path: MathArena/arxivmath-0926
+allow_harness: true
+harness_config:
+  max_time_seconds: 43200
+  max_cost_usd: 100
+  cost_limit_grace_seconds: 300
+  cost_limit_grace_prompt: 'You have hit the cost budget. You must produce your final
+    answer within the next {cost_limit_grace_minutes} minutes or you will not receive
+    any positive score. Use your existing reasoning and saved work to give the best
+    answer you can now.
+
+    Your final deadline is {cost_limit_deadline_at} (UTC). You can check the current
+    time with `date -u`. The original overall time limit still applies.
+
+    '
+  time_limit_prompt: '## Time limit
+
+    You have at the very most {run_time_limit_hours} hours to finish this question,
+    including tool use and any continuations.
+
+    This attempt started at {run_started_at}. Your deadline is {run_deadline_at}.
+
+    These timestamps are in UTC. You can check the current time with `date -u`; submit
+    your final answer before the deadline.
+
+    Exceeding the time limit counts as incorrect.
+
+    '
+  docker_image: matharena-harness-arxivlean:lean4.31
+  image_enforces_no_new_privileges: true
+  direct_network: false
+  read_only_rootfs: true
+  auto_fallback: false
+  auto_wait: false
+  rate_limit_timeout: 60
+  max_recovery_attempts: 3
+grading: answer_judge
+judge_configs:
+- judges/answer_judge

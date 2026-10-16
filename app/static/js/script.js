@@ -8,22 +8,56 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-function copyToClipboard() {
-    const button = event.target;
-    const parentDiv = button.closest('div');
-    const siblings = Array.from(parentDiv.children).filter(el => el.tagName === 'P');
-    const text = siblings.map(el => el.innerHTML).join('\n');
-    navigator.clipboard.writeText(text).then(function() {
-        const originalText = button.textContent;
-        button.textContent = '[Copied!]';
-        setTimeout(function() {
-            button.textContent = originalText;
-        }, 1500);
-    }).catch(function(err) {
-        console.error('Failed to copy: ', err);
-        alert('Failed to copy to clipboard');
+document.addEventListener('DOMContentLoaded', function() {
+    const table = document.getElementById('leaderboard');
+    if (table) {
+        const body = table.tBodies[0];
+        const rows = Array.from(body.rows);
+        table.querySelectorAll('[data-sort-key]').forEach(button => {
+            button.addEventListener('click', () => {
+                const heading = button.closest('th');
+                const previous = heading.getAttribute('aria-sort');
+                const direction = previous === 'ascending' ? 'desc' : previous === 'descending' ? 'asc' : (button.dataset.defaultDirection || 'asc');
+                const key = button.dataset.sortKey;
+                const sorted = [...rows].sort((a, b) => {
+                    const left = a.dataset[key];
+                    const right = b.dataset[key];
+                    if (left === '' || right === '') return left === right ? 0 : left === '' ? 1 : -1;
+                    const difference = button.dataset.sortType === 'text'
+                        ? left.localeCompare(right, undefined, { sensitivity: 'base', numeric: true })
+                        : Number(left) - Number(right);
+                    return (direction === 'asc' ? difference : -difference) || a.dataset.model.localeCompare(b.dataset.model);
+                });
+                sorted.forEach(row => body.appendChild(row));
+                table.querySelectorAll('thead th[aria-sort]').forEach(th => {
+                    th.setAttribute('aria-sort', 'none');
+                    th.querySelector('.sort-indicator').textContent = '↕';
+                });
+                heading.setAttribute('aria-sort', direction === 'asc' ? 'ascending' : 'descending');
+                button.querySelector('.sort-indicator').textContent = direction === 'asc' ? '↑' : '↓';
+            });
+        });
+    }
+    document.querySelectorAll('[data-copy-table]').forEach(button => {
+        button.addEventListener('click', async () => {
+            const table = document.getElementById(button.dataset.copyTable);
+            const text = Array.from(table.rows).filter(row => !row.hidden).map(row =>
+                Array.from(row.cells).map(cell => {
+                    const clone = cell.cloneNode(true);
+                    clone.querySelectorAll('.sort-indicator, .row-arrow').forEach(node => node.remove());
+                    return clone.textContent.replace(/\s+/g, ' ').trim();
+                }).join('\t')
+            ).join('\n');
+            try {
+                await navigator.clipboard.writeText(text);
+                button.textContent = 'Copied';
+            } catch (_) {
+                button.textContent = 'Copy unavailable';
+            }
+            setTimeout(() => { button.textContent = 'Copy table'; }, 1800);
+        });
     });
-}
+});
 
 document.addEventListener('DOMContentLoaded', function() {
     const current = document.querySelector('.sidebar-item.current');
@@ -41,10 +75,18 @@ function competitionUrl(path) {
 }
 
 function loadResponseBox(element) {
-    if (!element.open || element.hasAttribute('data-loaded')) return;
+    const panel = element.closest('.run-tabcontent');
+    if (panel && panel.style.display === 'none') return;
+    if (!element.open || element.hasAttribute('data-loaded') || element.hasAttribute('data-loading')) return;
+    element.setAttribute('data-loading', true);
     const idd = element.getAttribute('id');
-    fetch(competitionUrl(`/modelinteraction/${encodeURIComponent(idd)}`))
-        .then(response => response.text())
+    const url = competitionUrl(`/modelinteraction/${encodeURIComponent(idd)}`);
+    if (element.hasAttribute('data-trace-only')) url.searchParams.set('trace_only', '1');
+    fetch(url)
+        .then(response => {
+            if (!response.ok) throw new Error('Failed to load conversation.');
+            return response.text();
+        })
         .then(data => {
             const wrapper = document.createElement('div');
             wrapper.className = 'conversation-content';
@@ -52,9 +94,12 @@ function loadResponseBox(element) {
             element.appendChild(wrapper);
             element.setAttribute('data-loaded', true);
             renderMarkedElements(wrapper);
-            if (window.hljs) hljs.highlightAll();
+            if (window.hljs) {
+                wrapper.querySelectorAll('pre code:not([data-highlighted])').forEach(block => hljs.highlightElement(block));
+            }
         })
-        .catch(error => console.error('Error fetching details:', error));
+        .catch(error => console.error('Error fetching details:', error))
+        .finally(() => element.removeAttribute('data-loading'));
 }
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -83,7 +128,9 @@ function loadHistoryStep(stepId) {
             const element = document.getElementById(`history-step-content-${index}`);
             element.innerHTML = data;
             renderMarkedElements(element);
-            if (window.hljs) hljs.highlightAll();
+            if (window.hljs) {
+                element.querySelectorAll('pre code:not([data-highlighted])').forEach(block => hljs.highlightElement(block));
+            }
         })
         .catch(error => {
             console.error('Error fetching step:', error);
@@ -91,12 +138,31 @@ function loadHistoryStep(stepId) {
         });
 }
 
-function toggleSidebar() {
-    const sidebar = document.getElementById('sidebar');
-    const toggleButton = document.getElementById('sidebar-toggle-button');
-    const isCollapsed = sidebar.classList.toggle('collapsed');
-    if (toggleButton) toggleButton.innerHTML = isCollapsed ? '&#9776;' : '&times;';
+function syncNavigation() {
+    const mobile = window.matchMedia('(max-width: 800px)').matches;
+    const open = mobile ? document.body.classList.contains('nav-open') : !document.body.classList.contains('sidebar-collapsed');
+    document.getElementById('sidebar-toggle-button')?.setAttribute('aria-expanded', String(open));
 }
+
+function toggleSidebar() {
+    const mobile = window.matchMedia('(max-width: 800px)').matches;
+    document.body.classList.toggle(mobile ? 'nav-open' : 'sidebar-collapsed');
+    syncNavigation();
+    if (mobile && document.body.classList.contains('nav-open')) {
+        document.getElementById('comp-dropdown').focus();
+    } else {
+        document.getElementById('sidebar-toggle-button').focus();
+    }
+}
+
+document.addEventListener('DOMContentLoaded', syncNavigation);
+window.matchMedia('(max-width: 800px)').addEventListener('change', () => {
+    document.body.classList.remove('nav-open');
+    syncNavigation();
+});
+document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && document.body.classList.contains('nav-open')) toggleSidebar();
+});
 
 function rerenderMath(element, attempt = 0) {
     if (!element) return;

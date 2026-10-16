@@ -1,6 +1,7 @@
 import hashlib
 import io
 import tarfile
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -30,6 +31,8 @@ def test_releases_default_to_latest_and_are_complete() -> None:
         "qwen-code",
         "deepcode",
         "muse-code",
+        "grok-build",
+        "mistral-vibe",
     }
     assert all(
         release.version == DEFAULT_CLI_VERSION for release in SUPPORTED_CLI_RELEASES.values()
@@ -97,6 +100,8 @@ def test_missing_private_install_reports_none(tmp_path: Path) -> None:
         "qwen-code": None,
         "deepcode": None,
         "muse-code": None,
+        "grok-build": None,
+        "mistral-vibe": None,
     }
 
 
@@ -122,6 +127,10 @@ def test_cli_dry_run_without_names_selects_all_releases(capsys: pytest.CaptureFi
                 "deepcode=0.3.1",
                 "--version",
                 "muse-code=1.0.3-R2198.1",
+                "--version",
+                "grok-build=1.0.40",
+                "--version",
+                "mistral-vibe=2.26.0",
             ]
         )
         == 0
@@ -136,6 +145,7 @@ def test_cli_dry_run_without_names_selects_all_releases(capsys: pytest.CaptureFi
     assert "npm:@qwen-code/qwen-code@0.23.0" in output
     assert "npm:opencode-ai@1.18.27" in output
     assert "npm:@vegamo/deepcode-cli@0.3.1" in output
+    assert "/mistral-vibe/releases/download/v2.26.0/vibe-linux-x86_64-2.26.0.zip" in output
 
 
 def test_npm_distribution_is_staged_with_its_package_tree(
@@ -441,3 +451,111 @@ def test_cli_login_rejects_unknown_provider(capsys: pytest.CaptureFixture[str]) 
 def test_cli_rejects_local_callback_for_non_openai(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["login", "kimi", "--local-callback"]) == 2
     assert "only supported for the openai" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("target", "expected"), [
+    ("linux-x64", "linux-x86_64"), ("linux-arm64", "linux-aarch64"),
+    ("darwin-x64", "macos-x86_64"), ("darwin-arm64", "macos-aarch64"),
+])
+def test_grok_platform_names(target, expected):
+    from harness_wrapper.installation import _grok_target
+    assert _grok_target(target) == expected
+
+
+def test_grok_latest_resolves_from_official_channel(monkeypatch):
+    def fetch(request, timeout):
+        assert request.full_url == "https://x.ai/cli/stable"
+        return io.BytesIO(b"1.0.40\n")
+    monkeypatch.setattr("harness_wrapper.installation.urllib.request.urlopen", fetch)
+    release = resolve_cli_release("grok-build")
+    assert release.version == "1.0.40" and release.executable == "grok"
+
+
+def test_grok_install_checks_version_before_committing(monkeypatch, tmp_path):
+    def download(url, path):
+        assert url == "https://x.ai/cli/grok-1.0.40-linux-x86_64"
+        path.write_text("test executable")
+    monkeypatch.setattr("harness_wrapper.installation._download", download)
+    monkeypatch.setattr("harness_wrapper.installation._installed_version", lambda p: "1.0.39")
+    with pytest.raises(RuntimeError, match="does not report 1.0.40"):
+        install_clis(["grok-build"], prefix=tmp_path, versions={"grok-build": "1.0.40"})
+    assert not (tmp_path / "bin/grok").exists()
+    monkeypatch.setattr("harness_wrapper.installation._installed_version", lambda p: "1.0.40")
+    install_clis(["grok-build"], prefix=tmp_path, versions={"grok-build": "1.0.40"})
+    assert (tmp_path / "bin/grok").read_text() == "test executable"
+
+
+def _vibe_archive(entries: dict[str, tuple[bytes, int]]) -> bytes:
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as bundle:
+        for name, (content, mode) in entries.items():
+            info = zipfile.ZipInfo(name)
+            info.external_attr = (0o100000 | mode) << 16
+            bundle.writestr(info, content)
+    return output.getvalue()
+
+
+def test_vibe_latest_resolves_through_github(monkeypatch: pytest.MonkeyPatch) -> None:
+    urls: list[str] = []
+
+    def metadata(url: str):
+        urls.append(url)
+        return {"tag_name": "v2.26.0"}
+
+    monkeypatch.setattr("harness_wrapper.installation._fetch_json", metadata)
+    release = resolve_cli_release("mistral-vibe")
+    assert release.version == "2.26.0" and release.executable == "vibe"
+    assert urls == ["https://api.github.com/repos/mistralai/mistral-vibe/releases/latest"]
+
+
+def test_vibe_bundle_is_verified_and_installs_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive_bytes = _vibe_archive(
+        {
+            "vibe": (b"native-vibe", 0o755),
+            "_internal/libpython3.12.so.1.0": (b"python", 0o755),
+            "_internal/vibe/__init__.py": (b"", 0o644),
+        }
+    )
+    filename = "vibe-linux-x86_64-2.26.0.zip"
+    seen_urls: list[str] = []
+    monkeypatch.setattr("harness_wrapper.installation._platforms", lambda: ("linux-x64",) * 3)
+    monkeypatch.setattr(
+        "harness_wrapper.installation._fetch_json",
+        lambda url: {
+            "assets": [
+                {"name": filename, "digest": f"sha256:{hashlib.sha256(archive_bytes).hexdigest()}"}
+            ]
+        },
+    )
+
+    def download(url: str, destination: Path) -> None:
+        seen_urls.append(url)
+        destination.write_bytes(archive_bytes)
+
+    monkeypatch.setattr("harness_wrapper.installation._download", download)
+    (tmp_path / "bin/_internal").mkdir(parents=True)
+    (tmp_path / "bin/_internal/stale.py").write_text("old")
+    install_clis(["mistral-vibe"], prefix=tmp_path, versions={"mistral-vibe": "2.26.0"})
+
+    executable = tmp_path / "bin" / "vibe"
+    assert executable.read_bytes() == b"native-vibe"
+    assert executable.stat().st_mode & 0o777 == 0o755
+    assert (tmp_path / "bin/_internal/vibe/__init__.py").stat().st_mode & 0o777 == 0o644
+    assert not (tmp_path / "bin/_internal/stale.py").exists()
+    assert seen_urls == [
+        "https://github.com/mistralai/mistral-vibe/releases/download/v2.26.0/" + filename
+    ]
+
+
+@pytest.mark.parametrize("name", ["../vibe", "/vibe", "other/tool"])
+def test_vibe_bundle_rejects_unexpected_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    from harness_wrapper.installation import _extract_vibe_package
+
+    archive = tmp_path / "vibe.zip"
+    archive.write_bytes(_vibe_archive({"vibe": (b"x", 0o755), name: (b"x", 0o755)}))
+    with pytest.raises(RuntimeError):
+        _extract_vibe_package(archive, tmp_path / "out", "https://example.invalid/vibe.zip")

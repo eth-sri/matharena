@@ -1,0 +1,70 @@
+lean: true
+lean_task: prove_or_disprove
+lean_environment: lean-4.34.1
+final_answer: false
+strict_parsing: false
+allow_harness: true
+default_harness: false
+instruction: "Prove or disprove the following conjecture in Lean 4.34.1 with mathlib.\n\
+  The frozen definition arxivleanConjecture is the original conjecture P.\nDo not\
+  \ infer that it is true or false from the task or the initial template.\n\nSubmit\
+  \ exactly one complete Lean code block, including the unchanged supplied\ndefinitions\
+  \ and all your helper lemmas. Choose EXACTLY ONE of these endings:\n  theorem arxivlean_proof\
+  \ : arxivleanConjecture := by\n    <proof of P>\nOR\n  theorem arxivlean_disproof\
+  \ : Not arxivleanConjecture := by\n    <proof of the negation of the entire P>\n\
+  \nThe theorem name is your explicit prove/disprove verdict. A Boolean answer,\n\
+  an informal counterexample, or a proof of the disjunction Or P (Not P) is not a\
+  \ solution.\nPreserve all definitions and hypotheses. No sorry, admit, new axioms,\n\
+  native_decide, additional assumptions, or weakened statements are allowed.\nThe\
+  \ comparator checks your theorem and its dependencies against a separate\nfrozen\
+  \ challenge. It does NOT replace or repair your theorem header.\nYou may use verify_submission\
+  \ to check the complete code with this grader.\n\nConjecture:\n{problem}\n\nFrozen\
+  \ definitions:\n```lean\n{formal_statement}\n```\n"
+harness_instruction: "Prove or disprove this conjecture in Lean 4.34.1 with mathlib.\n\
+  Work in /work. Save the COMPLETE submission in Solution.lean, keeping the\nsupplied\
+  \ definitions unchanged and adding any proved helpers there.\nThe initial proof\
+  \ placeholder does not indicate the correct branch.\nChoose EXACTLY ONE explicitly\
+  \ named final theorem:\n  theorem arxivlean_proof : arxivleanConjecture := by\n\
+  \    <proof>\nOR\n  theorem arxivlean_disproof : Not arxivleanConjecture := by\n\
+  \    <proof of the negation of the entire conjecture>\n\nDo not submit a proof of\
+  \ the disjunction Or P (Not P): excluded middle does not resolve P.\nNo sorry, admit,\
+  \ new axioms, native_decide, changed definitions, or extra\nhypotheses are permitted.\
+  \ Use installed mathlib and your own proved helpers.\nRun ./check.sh to test compilation.\
+  \ This is preliminary feedback only: the\nfinal grader compares the actual submitted\
+  \ theorem and all dependencies with\nan immutable challenge using the comparator.\
+  \ Headers are NOT replaced.\nReturn the complete Solution.lean in one Lean code\
+  \ block.\n\nConjecture:\n{problem}\n\nFrozen definitions:\n```lean\n{formal_statement}\n\
+  ```\n"
+harness_config:
+  max_cost_usd: 100
+  docker_image: matharena-harness-arxivlean:lean4.34.1
+  lean_runtime: image
+  lean_cache_volume: matharena-lean4341-cache
+  lean_toolchain_dir: leanprover--lean4---v4.34.1
+  cache_read_only: true
+  run_check_after_harness: true
+max_tool_calls: 200
+tools:
+- tool_spec:
+    type: function
+    function:
+      name: verify_submission
+      description: Check a complete prove/disprove Lean submission with the pinned
+        comparator; no header replacement.
+      parameters:
+        type: object
+        properties:
+          code:
+            type: string
+            description: Complete Lean source including definitions, helpers, and
+              exactly one branch theorem.
+        required:
+        - code
+n_problems: 53
+lean_project_identity:
+  lakefile_sha256: 50e05b964813ec231b946f589e6b07de7a9ff89d18c80cb3933eebc0dc9cf516
+  manifest_sha256: 9cdb0207e7a4904227af35eef1ddf5186f80cd1deef409fee3f6e0bfc8d07bfd
+  mathlib_revision: d13f23b723b8a846827a245b89c10fc7d3f11612
+  toolchain: leanprover/lean4:v4.34.1
+dataset_path: MathArena/arxivlean-0926
+date: '2026-09-01'

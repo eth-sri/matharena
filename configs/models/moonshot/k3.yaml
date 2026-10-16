@@ -1,6 +1,7 @@
 model: moonshotai/kimi-k3
 api: openrouter
 harness: kimi
+harness_version: "0.43.1"
 harness_config:
   auth: api
   container_executable: kimi

@@ -8,8 +8,8 @@ from matharena.tools.code_execution import execute_code
 
 
 class NormalizeJudge(BaseJudge):
-    def __init__(self, batch_idx, problem_idx, run_idx, solver_config):
-        super().__init__(batch_idx, problem_idx, run_idx, solver_config)
+    def __init__(self, batch_idx, problem_idx, run_idx, solver_config, *, container_runtime="docker"):
+        super().__init__(batch_idx, problem_idx, run_idx, solver_config, container_runtime=container_runtime)
         self.prepare_clients()
         self.RUN_ID = None
 

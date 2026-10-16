@@ -8,10 +8,12 @@ import os
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import tarfile
 import tempfile
 import urllib.request
+import zipfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -53,10 +55,14 @@ SUPPORTED_CLI_RELEASES: Mapping[str, CLIRelease] = {
         DEFAULT_CLI_VERSION,
         "agy",
     ),
+    "grok-build": CLIRelease("grok-build", "xai/grok-build", DEFAULT_CLI_VERSION, "grok"),
     "muse-code": CLIRelease("muse-code", "meta/muse-code", DEFAULT_CLI_VERSION, "muse"),
     "qwen-code": CLIRelease("qwen-code", "@qwen-code/qwen-code", DEFAULT_CLI_VERSION, "qwen"),
     "opencode": CLIRelease("opencode", "opencode-ai", DEFAULT_CLI_VERSION, "opencode"),
     "deepcode": CLIRelease("deepcode", "@vegamo/deepcode-cli", DEFAULT_CLI_VERSION, "deepcode"),
+    "mistral-vibe": CLIRelease(
+        "mistral-vibe", "mistralai/mistral-vibe", DEFAULT_CLI_VERSION, "vibe"
+    ),
 }
 
 _CLAUDE_DOWNLOAD_BASE = "https://downloads.claude.ai/claude-code-releases"
@@ -69,8 +75,11 @@ _ANTIGRAVITY_RELEASE_BASE = (
 _ANTIGRAVITY_RELEASE_API = (
     "https://api.github.com/repos/google-antigravity/antigravity-cli/releases"
 )
+_GROK_DOWNLOAD_BASE = "https://x.ai/cli"
 _MUSE_CHANNEL_URL = "https://api.meta.ai/muse-code/channels/muse-stable"
 _MUSE_DOWNLOAD_BASE = "https://lookaside.facebook.com/lookaside/muse/download/?channel=muse"
+_VIBE_RELEASE_BASE = "https://github.com/mistralai/mistral-vibe/releases/download"
+_VIBE_RELEASE_API = "https://api.github.com/repos/mistralai/mistral-vibe/releases"
 _NPM_REGISTRY = "https://registry.npmjs.org"
 _VERSION_RE = re.compile(r"^\d+(?:\.\d+){2}(?:[-+][0-9A-Za-z.-]+)?$")
 _NPM_DISTRIBUTIONS = frozenset({"qwen-code", "opencode", "deepcode"})
@@ -162,8 +171,19 @@ def resolve_cli_release(name: str, version: str = DEFAULT_CLI_VERSION) -> CLIRel
         if not isinstance(tag, str):
             raise RuntimeError("latest version is absent for Antigravity CLI")
         requested = _validate_version(tag.removeprefix("v"))
+    elif requested == DEFAULT_CLI_VERSION and name == "grok-build":
+        request = urllib.request.Request(
+            f"{_GROK_DOWNLOAD_BASE}/stable", headers={"User-Agent": "harness-wrapper"}
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            requested = _validate_version(response.read().decode().strip())
     elif requested == DEFAULT_CLI_VERSION and name == "muse-code":
         requested = _validate_version(str(_fetch_json(_MUSE_CHANNEL_URL)["version"]))
+    elif requested == DEFAULT_CLI_VERSION and name == "mistral-vibe":
+        tag = _fetch_json(f"{_VIBE_RELEASE_API}/latest").get("tag_name")
+        if not isinstance(tag, str):
+            raise RuntimeError("latest version is absent for Mistral Vibe")
+        requested = _validate_version(tag.removeprefix("v"))
     elif requested == DEFAULT_CLI_VERSION:
         package = quote(template.package, safe="")
         metadata = _fetch_json(f"{_NPM_REGISTRY}/{package}/latest")
@@ -204,6 +224,23 @@ def _manifest_platform(manifest: Mapping[str, Any], target: str, url: str) -> Ma
     if not isinstance(entry, dict):
         raise RuntimeError(f"platform {target!r} is absent from {url}")
     return entry
+
+
+def _grok_target(native_target: str) -> str:
+    system, architecture = native_target.split("-", 1)
+    system = "macos" if system == "darwin" else system
+    architecture = "aarch64" if architecture == "arm64" else "x86_64"
+    return f"{system}-{architecture}"
+
+
+def _install_grok(release: CLIRelease, target: str, temporary: Path) -> Path:
+    # The official installer publishes versioned HTTPS binaries, without a checksum manifest.
+    downloaded = temporary / release.executable
+    _download(f"{_GROK_DOWNLOAD_BASE}/grok-{release.version}-{target}", downloaded)
+    downloaded.chmod(0o755)
+    if _installed_version(downloaded) != release.version:
+        raise RuntimeError(f"downloaded Grok Build does not report {release.version}")
+    return downloaded
 
 
 def _muse_target(native_target: str) -> str:
@@ -306,6 +343,80 @@ def _install_antigravity(release: CLIRelease, target: str, temporary: Path) -> P
     if not found:
         raise RuntimeError(f"Antigravity executable is absent from {url}")
     return downloaded
+
+
+def _vibe_target(native_target: str) -> str:
+    system, architecture = native_target.split("-", 1)
+    return f"{system}-{'aarch64' if architecture == 'arm64' else 'x86_64'}"
+
+
+def _vibe_filename(target: str, version: str) -> str:
+    return f"vibe-{target}-{version}.zip"
+
+
+def _extract_vibe_package(archive: Path, destination: Path, url: str) -> None:
+    """Extract the PyInstaller bundle: ``vibe`` plus its adjacent ``_internal`` tree."""
+
+    bin_dir = destination / "bin"
+    bin_dir.mkdir(parents=True)
+    with zipfile.ZipFile(archive) as bundle:
+        for member in bundle.infolist():
+            path = PurePosixPath(member.filename)
+            parts = tuple(part for part in path.parts if part != ".")
+            if path.is_absolute() or ".." in parts:
+                raise RuntimeError(f"unsafe path {member.filename!r} in {url}")
+            if not parts or member.is_dir():
+                continue
+            if parts != ("vibe",) and parts[0] != "_internal":
+                raise RuntimeError(f"unexpected archive entry {member.filename!r} in {url}")
+            mode = member.external_attr >> 16
+            if mode and not stat.S_ISREG(mode):
+                raise RuntimeError(f"unsupported archive entry {member.filename!r} in {url}")
+            output = bin_dir.joinpath(*parts)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            with bundle.open(member) as source, output.open("xb") as target_file:
+                shutil.copyfileobj(source, target_file)
+            output.chmod((mode & 0o777) or 0o644)
+    if not (bin_dir / "vibe").is_file():
+        raise RuntimeError(f"Mistral Vibe executable is absent from {url}")
+
+
+def _install_vibe(release: CLIRelease, target: str, temporary: Path) -> Path:
+    tag = f"v{release.version}"
+    filename = _vibe_filename(target, release.version)
+    metadata_url = f"{_VIBE_RELEASE_API}/tags/{tag}"
+    metadata = _fetch_json(metadata_url)
+    assets = metadata.get("assets")
+    asset = (
+        next(
+            (item for item in assets if isinstance(item, dict) and item.get("name") == filename),
+            None,
+        )
+        if isinstance(assets, list)
+        else None
+    )
+    digest = asset.get("digest") if isinstance(asset, dict) else None
+    if not isinstance(digest, str) or not digest.startswith("sha256:"):
+        raise RuntimeError(f"SHA-256 digest for {filename} is absent from {metadata_url}")
+
+    url = f"{_VIBE_RELEASE_BASE}/{tag}/{filename}"
+    archive = temporary / filename
+    _verified_download(url, digest.removeprefix("sha256:"), archive)
+    package = temporary / "vibe-package"
+    _extract_vibe_package(archive, package, url)
+    return package
+
+
+def _commit_vibe_package(package: Path, root: Path) -> None:
+    """Replace the bundle's runtime tree, exposing the new entrypoint last."""
+
+    bin_dir = cli_bin_dir(root)
+    internal = bin_dir / "_internal"
+    if internal.exists():
+        shutil.rmtree(internal)
+    os.replace(package / "bin" / "_internal", internal)
+    os.replace(package / "bin" / "vibe", bin_dir / "vibe")
+    (bin_dir / "vibe").chmod(0o755)
 
 
 def _codex_package_filename(target: str) -> str:
@@ -462,9 +573,16 @@ def _download_urls(releases: Sequence[CLIRelease]) -> list[str]:
     for release in releases:
         if release.name in _NPM_DISTRIBUTIONS:
             urls.append(f"npm:{release.spec}")
+        elif release.name == "grok-build":
+            urls.append(f"{_GROK_DOWNLOAD_BASE}/grok-{release.version}-{_grok_target(claude_target)}")
         elif release.name == "muse-code":
             target = _muse_target(claude_target).replace("_", "-")
             urls.append(_muse_url(release.version, f"muse-{target}"))
+        elif release.name == "mistral-vibe":
+            urls.append(
+                f"{_VIBE_RELEASE_BASE}/v{release.version}/"
+                f"{_vibe_filename(_vibe_target(claude_target), release.version)}"
+            )
         elif release.name == "claude-code":
             urls.append(f"{_CLAUDE_DOWNLOAD_BASE}/{release.version}/{claude_target}/claude")
         elif release.name == "codex-cli":
@@ -527,13 +645,19 @@ def install_clis(
             if release.name in _NPM_DISTRIBUTIONS:
                 _install_npm_release(release, root, temporary, npm)
                 continue
-            if release.name == "muse-code":
+            if release.name == "grok-build":
+                downloaded = _install_grok(release, _grok_target(claude_target), temporary)
+            elif release.name == "muse-code":
                 downloaded = _install_muse(release, _muse_target(claude_target), temporary)
             elif release.name == "claude-code":
                 downloaded = _install_claude(release, claude_target, temporary)
             elif release.name == "codex-cli":
                 package = _install_codex(release, codex_target, temporary)
                 _commit_codex_package(package, root)
+                continue
+            elif release.name == "mistral-vibe":
+                package = _install_vibe(release, _vibe_target(claude_target), temporary)
+                _commit_vibe_package(package, root)
                 continue
             elif release.name == "antigravity-cli":
                 downloaded = _install_antigravity(release, antigravity_target, temporary)

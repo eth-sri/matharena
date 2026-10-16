@@ -157,3 +157,30 @@ def test_independent_attempts_serialize_and_aggregate_time(tmp_path, monkeypatch
     runs.load_from_file()
     assert runs.N == 2
     assert runs.cost["time"] == 17.0
+
+
+def test_recovery_counts_accumulate_across_continuations(tmp_path, monkeypatch):
+    solver, _ = make_solver(tmp_path, monkeypatch)
+    agent = harness_solver.Agent()
+    notices = [
+        AgentEvent(type="recovery", content={"reason": "provider_stream_error"}),
+        AgentEvent(type="recovery", content={"reason": "error_retry", "attempt": 1}),
+        AgentEvent(type="session", session_id="timed-session"),
+        AgentEvent(type="recovery", content={"reason": "error_retry", "attempt": 2}),
+        AgentEvent(type="result", content="42"),
+    ]
+    agent.run = lambda prompt: notices
+    agent.resume = lambda prompt, **kwargs: [
+        AgentEvent(type="recovery", content={"reason": "error_retry", "attempt": 1}),
+        AgentEvent(type="result", content="42"),
+    ]
+    response = solver._solve_one(0, "Problem", None, 1, 0)
+    assert response.detailed_cost["n_retries"] == 2
+    initial_cost = response.detailed_cost["cost"]
+    for expected in (3, 4):
+        solver.last_chance(response)
+        assert response.detailed_cost["n_retries"] == expected
+        assert response.detailed_cost["cost"] == initial_cost
+    agent.run = lambda prompt: [AgentEvent(type="result", content="42")]
+    second = solver._solve_one(1, "Problem", None, 1, 1)
+    assert second.detailed_cost["n_retries"] == 0

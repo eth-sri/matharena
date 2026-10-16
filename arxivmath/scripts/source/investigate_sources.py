@@ -18,6 +18,7 @@ from matharena.arxivbench_utils import (
     resolve_model_config_path,
 )
 from matharena.query_client import create_query_client
+from matharena.container_runtime import add_container_runtime_argument
 from matharena.arxivmath_source import (
     add_source_mode_argument,
     configure_source_mode,
@@ -95,6 +96,7 @@ def main() -> int:
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--allow-source-unavailable", action="store_true")
     add_source_mode_argument(parser)
+    add_container_runtime_argument(parser)
     args = parser.parse_args()
     configure_source_mode(args)
     if args.batch_size < 1:
@@ -250,7 +252,7 @@ def main() -> int:
         received: set[int] = set()
         try:
             if client is None:
-                client = create_query_client(model_config)
+                client = create_query_client(model_config, container_runtime=args.container_runtime)
             for index, conversation, cost in client.run_queries([value["query"] for value in batch]):
                 if not isinstance(index, int) or not 0 <= index < len(batch):
                     continue

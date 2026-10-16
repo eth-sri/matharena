@@ -141,6 +141,18 @@ def grade_lean_submission(messages, competition_config, problem, debug_info=""):
     formal_statement = problem.get("formal_statement")
 
     environment = competition_config.get("lean_environment")
+    if competition_config.get("lean_task") == "prove_or_disprove":
+        from matharena.lean_conjecture import check_submission
+
+        if not isinstance(competition_config.get("lean_project_identity"), dict):
+            raise RuntimeError("Conjecture competition is missing its pinned Lean/mathlib identity")
+        feedback = check_submission(
+            last_message, formal_statement, environment=environment,
+            expected_runtime=competition_config.get("lean_project_identity"),
+        )
+        if feedback["status"] == "unverified":
+            raise RuntimeError(f"[{debug_info}] Lean conjecture remains unverified: {feedback['errors']}")
+        return feedback.get("verdict"), feedback["okay"], WarningType.NONE.value
     feedback = get_lean_feedback_dict_with_formal_statement(
         last_message, formal_statement, environment=environment, messages=messages, use_comparator=True
     )
@@ -149,8 +161,6 @@ def grade_lean_submission(messages, competition_config, problem, debug_info=""):
         comparator_warning in feedback["warnings"] for comparator_warning in COMPARATOR_FALLBACK_WARNINGS
     ) else WarningType.NONE
     return None, is_correct, warning.value
-
-
 
 
 def extract_and_grade(messages, output_tokens, gold_answer, competition_config, problem=None, debug_info=""):

@@ -19,6 +19,13 @@ from urllib.parse import urlsplit, urlunsplit
 
 from loguru import logger
 
+from .request_policy import (
+    OfflinePolicyError,
+    open_offline_upstream,
+    reject_offline_request,
+    validate_offline_request,
+)
+
 RequestObserver = Callable[[str, Mapping[str, Any]], bool | None]
 ResponseObserver = Callable[[str, Mapping[str, Any]], None]
 RequestTransform = Callable[[str, dict[str, Any]], None]
@@ -176,6 +183,7 @@ class _CaptureServer(ThreadingHTTPServer):
     merge_request_overrides: bool
     request_drop_fields: frozenset[str]
     allow_remote_clients: bool
+    offline_models: frozenset[str]
     upstream_timeout: float
     on_request: RequestObserver
     on_response: ResponseObserver | None
@@ -193,6 +201,7 @@ class _CaptureUnixServer(_ThreadingUnixHTTPServer):
     merge_request_overrides: bool
     request_drop_fields: frozenset[str]
     allow_remote_clients: bool
+    offline_models: frozenset[str]
     upstream_timeout: float
     on_request: RequestObserver
     on_response: ResponseObserver | None
@@ -303,6 +312,18 @@ class _CaptureHandler(BaseHTTPRequestHandler):
                     error_type=type(error).__name__,
                 )
 
+        if self.server.offline_models:
+            try:
+                validate_offline_request(
+                    self.command,
+                    upstream_path + ("?" + parsed.query if parsed.query else ""),
+                    body,
+                    models=self.server.offline_models,
+                )
+            except OfflinePolicyError as error:
+                reject_offline_request(self, error)
+                return
+
         headers = {
             name: value
             for name, value in self.headers.items()
@@ -389,6 +410,7 @@ class RequestCaptureProxy:
         listen_host: str = "127.0.0.1",
         client_host: str = "127.0.0.1",
         allow_remote_clients: bool = False,
+        offline_models: frozenset[str] = frozenset(),
         unix_socket: os.PathLike[str] | None = None,
         client_port: int | None = None,
     ) -> None:
@@ -407,13 +429,16 @@ class RequestCaptureProxy:
         self._listen_host = listen_host
         self._client_host = client_host
         self._allow_remote_clients = allow_remote_clients
+        self._offline_models = offline_models
         self._unix_socket = os.fspath(unix_socket) if unix_socket is not None else None
         self._client_port = client_port
         if (self._unix_socket is None) != (client_port is None):
             raise ValueError("unix_socket and client_port must be provided together")
         self._on_request = on_request
         self._on_response = on_response
-        self._open_upstream = open_upstream or urllib.request.urlopen
+        self._open_upstream = open_upstream or (
+            open_offline_upstream if offline_models else urllib.request.urlopen
+        )
         self._route_secret = secrets.token_urlsafe(24)
         self._server: _CaptureServer | _CaptureUnixServer | None = None
         self._thread: threading.Thread | None = None
@@ -449,6 +474,7 @@ class RequestCaptureProxy:
         server.request_drop_fields = self._request_drop_fields
         server.merge_request_overrides = self._merge_request_overrides
         server.allow_remote_clients = self._allow_remote_clients
+        server.offline_models = self._offline_models
         server.route_secret = self._route_secret
         server.on_request = self._on_request
         server.on_response = self._on_response

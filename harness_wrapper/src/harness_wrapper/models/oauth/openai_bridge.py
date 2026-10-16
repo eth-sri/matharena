@@ -26,6 +26,11 @@ from ..request_capture import (
     ResponseObserver,
     _ThreadingUnixHTTPServer,
 )
+from ..request_policy import (
+    OfflinePolicyError,
+    reject_offline_request,
+    validate_offline_request,
+)
 from .native_credentials import codex_oauth_credential
 from .oauth import AuthenticationError, CredentialStore
 
@@ -118,6 +123,7 @@ class _BridgeServer(ThreadingHTTPServer):
     on_request: RequestObserver | None
     on_response: ResponseObserver | None
     allow_remote_clients: bool
+    offline_models: frozenset[str]
     request_overrides: Mapping[str, object]
 
 
@@ -128,6 +134,7 @@ class _BridgeUnixServer(_ThreadingUnixHTTPServer):
     on_request: RequestObserver | None
     on_response: ResponseObserver | None
     allow_remote_clients: bool
+    offline_models: frozenset[str]
     request_overrides: Mapping[str, object]
 
 
@@ -174,6 +181,18 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                     "Could not inspect model request: error_type={error_type}",
                     error_type=type(error).__name__,
                 )
+
+        if self.server.offline_models:
+            try:
+                validate_offline_request(
+                    "POST",
+                    self.path,
+                    json.dumps(payload).encode(),
+                    models=self.server.offline_models,
+                )
+            except OfflinePolicyError as error:
+                reject_offline_request(self, error)
+                return
 
         credentials = self.server.credentials or load_central_openai_oauth_credentials()
         # Preserve native session/turn routing, but replace credentials and keep
@@ -316,6 +335,7 @@ class CodexOAuthResponsesProxy:
         listen_host: str = "127.0.0.1",
         client_host: str = "127.0.0.1",
         allow_remote_clients: bool = False,
+        offline_models: frozenset[str] = frozenset(),
         unix_socket: os.PathLike[str] | None = None,
         client_port: int | None = None,
     ) -> None:
@@ -327,6 +347,7 @@ class CodexOAuthResponsesProxy:
         self.listen_host = listen_host
         self.client_host = client_host
         self.allow_remote_clients = allow_remote_clients
+        self.offline_models = offline_models
         self.unix_socket = os.fspath(unix_socket) if unix_socket is not None else None
         self.client_port = client_port
         if (self.unix_socket is None) != (client_port is None):
@@ -369,6 +390,7 @@ class CodexOAuthResponsesProxy:
         server.on_response = self.on_response
         server.request_overrides = self.request_overrides
         server.allow_remote_clients = self.allow_remote_clients
+        server.offline_models = self.offline_models
         thread = threading.Thread(
             target=server.serve_forever,
             name="codex-oauth-responses-bridge",

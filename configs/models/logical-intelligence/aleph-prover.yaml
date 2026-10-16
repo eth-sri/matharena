@@ -1,7 +1,8 @@
 model: aleph-prover
 api: external
 human_readable_id: AlephProver
-date: "2026-05-14"
+date: "2026-09-15"
 other_params:
+  exclude_from_expected_performance: true
   open: false
   creator: Logical Intelligence

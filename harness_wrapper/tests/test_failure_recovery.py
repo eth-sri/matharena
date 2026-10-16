@@ -24,16 +24,16 @@ def lines(*events):
     "HTTP 400 invalid_request_error", "HTTP 429 rate limit exceeded",
     "connection reset by peer", "unrecognized failure",
 ])
-def test_all_failures_use_configured_retry_budget(tmp_path, detail):
+def test_all_failures_use_default_retry_budget(tmp_path, detail):
     factory = ProcessSequenceFactory(*[
-        FakeProcess(stderr=detail, returncode=1) for _ in range(4)
+        FakeProcess(stderr=detail, returncode=1) for _ in range(11)
     ])
     agent = make_agent(CodexCLIAgent, tmp_path, process_factory=factory)
     events = []
     with pytest.raises(CLIProcessError, match=detail):
         events.extend(agent.stream("solve"))
-    assert len(factory.calls) == 4
-    assert [e.content["attempt"] for e in events if e.type == "recovery"] == [1, 2, 3]
+    assert len(factory.calls) == 11
+    assert [e.content["attempt"] for e in events if e.type == "recovery"] == list(range(1, 11))
     assert events[-1].type == "error"
 
 
@@ -48,7 +48,7 @@ def test_pre_spawn_errors_retry_and_preserve_exception(tmp_path, exception):
     agent = make_agent(CodexCLIAgent, tmp_path, process_factory=spawn)
     with pytest.raises(exception, match="startup failure"):
         agent.run("solve")
-    assert len(calls) == 4
+    assert len(calls) == 11
     assert all(command == calls[0] for command in calls)
 
 
@@ -113,7 +113,7 @@ def test_qwen_failure_with_success_exit_resumes_and_retains_usage(tmp_path, erro
             {"type": "result", "usage": {"output_tokens": 99}, **error},
         )),
         FakeProcess(stdout=lines({
-            "type": "result", "result": "done", "usage": {"output_tokens": 11},
+            "type": "result", "result": "done", "usage": {"output_tokens": 110},
         })),
     )
     agent = make_agent(QwenCodeAgent, tmp_path, process_factory=factory)
@@ -180,7 +180,7 @@ def test_runtime_authentication_errors_are_inside_retry_budget(tmp_path, monkeyp
     monkeypatch.setattr(agent, "_prepare_runtime_model", prepare)
     with pytest.raises(ValueError, match="invalid credentials"):
         agent.run("solve")
-    assert len(preparations) == 4
+    assert len(preparations) == 11
     assert not factory.calls
 
 
@@ -238,3 +238,58 @@ def test_every_recovery_action_waits_at_least_sixty_seconds(tmp_path, monkeypatc
     assert delays == [60]
     assert [e.content["retry_delay_seconds"] for e in events if e.type == "recovery"] == [60]
     assert len(factory.calls) == 2
+
+
+@pytest.mark.parametrize("source", ["assistant", "synthetic_error", "system", "proxy"])
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_claude_reasoning_extraction_is_terminal_and_keeps_usage(tmp_path, monkeypatch, source, returncode):
+    from harness_wrapper.harnesses.claude_code import ClaudeCodeAgent
+
+    details = {"type": "refusal", "category": "reasoning_extraction"}
+    refusal = {
+        "type": "assistant", "isApiErrorMessage": source == "synthetic_error",
+        "message": {"role": "assistant", "stop_reason": "refusal", "stop_details": details,
+                    "content": [{"type": "text", "text": "API refusal"}]},
+    }
+    if source == "system":
+        refusal = {"type": "system", "subtype": "model_refusal_no_fallback",
+                   "apiRefusalCategory": "reasoning_extraction"}
+    if source == "proxy":
+        refusal = {"type": "assistant", "isApiErrorMessage": True,
+                   "message": {"content": [{"type": "text", "text": "API refusal"}]}}
+    process = FakeProcess(stdout=lines(
+        {"type": "system", "subtype": "init", "session_id": "refused-session"},
+        refusal,
+        {"type": "result", "is_error": True, "stop_reason": "refusal", "result": "API refusal",
+         "usage": {"input_tokens": 100, "output_tokens": 128025}},
+    ), returncode=returncode)
+    factory = ProcessSequenceFactory(process)
+    agent = make_agent(ClaudeCodeAgent, tmp_path, process_factory=factory)
+    if source == "proxy":
+        original = agent._stream_with_capture
+        def stream(*args, **kwargs):
+            agent._capture_model_response("/v1/messages", {
+                "type": "message_delta", "delta": {"stop_reason": "refusal", "stop_details": details},
+            })
+            yield from original(*args, **kwargs)
+        monkeypatch.setattr(agent, "_stream_with_capture", stream)
+    events = agent.run("Solve the problem")
+    assert len(factory.calls) == 1
+    assert not any(e.type == "recovery" for e in events)
+    assert events[-1].type == "result"
+    assert events[-1].raw["refusal_category"] == "reasoning_extraction"
+    assert agent.get_tokens().output_tokens == 128025
+    assert agent._process is None
+    assert not process.terminated  # Usage drained; CLI reaped normally.
+
+
+def test_refusal_detector_ignores_answer_text_and_other_categories():
+    from harness_wrapper.harnesses.claude_code.adapter import _is_reasoning_extraction_refusal
+
+    for payload in [
+        {"type": "assistant", "message": {"content": "reasoning_extraction"}},
+        {"type": "user", "content": '{"stop_details":{"category":"reasoning_extraction"}}'},
+        {"stop_reason": "max_tokens"},
+        {"stop_reason": "refusal", "stop_details": {"category": "other"}},
+    ]:
+        assert not _is_reasoning_extraction_refusal(payload)

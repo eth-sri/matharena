@@ -587,7 +587,7 @@ def test_completed_items_are_reviewable_before_verification_batch_finishes(monke
             visible_during_batch.append(json.loads((first / "llm_annotation.json").read_text())["stage"])
             raise RuntimeError("Interrupted before the second response")
 
-    monkeypatch.setattr(verify_questions, "create_query_client", lambda _: InterruptedClient())
+    monkeypatch.setattr(verify_questions, "create_query_client", lambda _, **kwargs: InterruptedClient())
     assert verify_questions.main() == 1
     assert visible_during_batch == ["selected_for_human_review"]
     assert json.loads((second / "llm_annotation.json").read_text())["keep"] is False
@@ -599,7 +599,7 @@ def test_completed_items_are_reviewable_before_verification_batch_finishes(monke
     write_json(final_path, final)
     reviewed_bytes = final_path.read_bytes()
     client = FakeClient(verification_response())
-    monkeypatch.setattr(verify_questions, "create_query_client", lambda _: client)
+    monkeypatch.setattr(verify_questions, "create_query_client", lambda _, **kwargs: client)
     assert verify_questions.main() == 0
     assert len(client.queries) == 1
     assert final_path.read_bytes() == reviewed_bytes

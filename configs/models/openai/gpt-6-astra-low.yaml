@@ -5,20 +5,23 @@ other_params:
   open: false
   creator: OpenAI
 
-model: gpt-6-astra
-api: openai
+model: openai/gpt-6-astra
+api: openrouter
 harness: codex
 harness_version: "0.153.3"
 reasoning_effort: low
 concurrent_requests: 16
-# API-equivalent token costs for reporting; auth below uses the subscription.
+# Uses OPENROUTER_API_KEY; standard OpenAI pricing per million tokens.
 read_cost: 10
 cache_read_cost: 1
 write_cost: 50
 
 harness_config:
-  auth: subscription
-  oauth_auto_login: false
-  oauth_auto_relogin: false
+  auth: api
   container_executable: codex
   model_context_window: 1050000
+  request_overrides:
+    provider:
+      only: [openai]
+      allow_fallbacks: false
+    service_tier: default

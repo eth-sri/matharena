@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from typing import Any
+from urllib.parse import urlsplit
 
 from ...agent import Agent, AgentEvent
 from ...models.oauth.openai_bridge import (
@@ -56,17 +57,20 @@ _MINIMAL_REQUIRED_FEATURES = (
     "shell_tool",
     "unified_exec",
 )
-_MINIMAL_DISABLED_FEATURES = (
-    "apps",
-    "auth_elicitation",
+_WEB_FEATURES = (
     "browser_use",
     "browser_use_external",
     "browser_use_full_cdp_access",
+    "in_app_browser",
+    "standalone_web_search",
+)
+_MINIMAL_DISABLED_FEATURES = (
+    "apps",
+    "auth_elicitation",
     "computer_use",
     "goals",
     "hooks",
     "image_generation",
-    "in_app_browser",
     "in_app_updates",
     "mentions_v2",
     "multi_agent",
@@ -79,7 +83,6 @@ _MINIMAL_DISABLED_FEATURES = (
     "shell_snapshot",
     "skill_mcp_dependency_install",
     "skill_search",
-    "standalone_web_search",
     "tool_call_mcp_elicitation",
     "tool_suggest",
     "view_image",
@@ -164,6 +167,29 @@ class CodexCLIAgent(Agent):
             overrides.update(tools=[], tool_choice="none", parallel_tool_calls=False)
         return overrides
 
+    def _filter_request(self, path: str, payload: dict[str, Any]) -> None:
+        if (
+            not self.internet_enabled
+            or not self.tools_enabled
+            or not path.rstrip("/").endswith("/responses")
+            or payload.get("tool_choice") == "none"
+            or urlsplit(self.model.endpoint_for("openai").url).hostname != "openrouter.ai"
+        ):
+            return
+        tools = payload.get("tools") or []
+        if any(tool.get("type") in {"web_search", "web_search_preview"} for tool in tools):
+            return
+        # Responses Lite advertises local tools in input rather than tools.
+        # Leave compaction and other tool-free requests untouched.
+        if not tools and not any(
+            isinstance(item, Mapping) and item.get("type") == "additional_tools" and item.get("tools")
+            for item in payload.get("input") or []
+        ):
+            return
+        # Native search preserves Responses Lite's custom tools and agent messages.
+        # OpenRouter's web_fetch server loop drops them when converting requests.
+        payload["tools"] = [*tools, {"type": "web_search", "external_web_access": True}]
+
     def model_cli_args(self) -> list[str]:
         """Create an invocation-local Codex provider for explicit API models."""
 
@@ -210,14 +236,19 @@ class CodexCLIAgent(Agent):
         if self.model_context_window is not None:
             result.extend(("-c", f"model_context_window={self.model_context_window}"))
         for key, value in _MINIMAL_CONFIG:
-            if key == "instructions" and not self.tools_enabled:
-                value = _TOOL_FREE_INSTRUCTIONS
+            if key == "instructions":
+                value = self.network_instructions(value) if self.tools_enabled else _TOOL_FREE_INSTRUCTIONS
+            elif key == "agents.enabled":
+                value = bool(self.subagents)
             result.extend(("-c", f"{key}={compact_json(value)}"))
         if self.tools_enabled:
             for feature in _MINIMAL_REQUIRED_FEATURES:
                 result.extend(("--enable", feature))
         for feature in _MINIMAL_DISABLED_FEATURES:
-            result.extend(("--disable", feature))
+            enabled = bool(self.subagents) and feature in {"multi_agent", "multi_agent_v2"}
+            result.extend(("--enable" if enabled else "--disable", feature))
+        for feature in _WEB_FEATURES:
+            result.extend(("--enable" if self.internet_enabled and self.tools_enabled else "--disable", feature))
         if not self.tools_enabled:
             for feature in _TOOL_FREE_DISABLED_FEATURES:
                 result.extend(("--disable", feature))
@@ -243,6 +274,7 @@ class CodexCLIAgent(Agent):
                     listen_host=route.listen_host,
                     client_host=route.client_host,
                     allow_remote_clients=route.allow_remote_clients,
+                    offline_models=self._offline_models,
                     unix_socket=route.unix_socket,
                     client_port=route.client_port,
                 ) as bridge,
@@ -282,9 +314,11 @@ class CodexCLIAgent(Agent):
                 upstream_headers=upstream_headers,
                 on_response=self._capture_model_response,
                 request_overrides=self._effective_request_overrides(),
+                request_transform=self._filter_request,
                 listen_host=route.listen_host,
                 client_host=route.client_host,
                 allow_remote_clients=route.allow_remote_clients,
+                offline_models=self._offline_models,
                 unix_socket=route.unix_socket,
                 client_port=route.client_port,
             ) as proxy,
@@ -317,7 +351,8 @@ class CodexCLIAgent(Agent):
         reasoning = getattr(self.model, "reasoning", None)
         if reasoning is not None:
             command.extend(("-c", f"model_reasoning_effort={compact_json(reasoning)}"))
-        command.extend(("-c", 'web_search="disabled"'))
+        web_search = "live" if self.internet_enabled and self.tools_enabled else "disabled"
+        command.extend(("-c", f"web_search={compact_json(web_search)}"))
         command.append("--dangerously-bypass-approvals-and-sandbox")
         command.append("--skip-git-repo-check")
         if self.subagents:

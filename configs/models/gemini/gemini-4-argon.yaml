@@ -1,0 +1,31 @@
+model: gemini-4-argon
+api: google
+# Antigravity CLI supplies the agent loop; GOOGLE_API_KEY pays for Gemini API usage.
+harness: gravity
+harness_version: "1.3.5"
+concurrent_requests: 16
+# Native API evaluations use SDK continuation for a 1M thinking/output budget (shared with input).
+use_google_genai: true
+max_tokens: 1048576
+timeout: 1200
+# Introductory USD/1M prices through 2026-11-30 (implicit caching only).
+# From 2026-12-01: cached input 0.20, input 4.00, output 20.00.
+# https://ai.google.dev/gemini-api/docs/pricing
+cache_read_cost: 0.10
+read_cost: 2.00
+tool_choice: auto
+write_cost: 10.00
+human_readable_id: Gemini 4 Argon
+date: "2026-10-13"
+reasoning_effort: high
+other_params:
+  open: false
+  creator: Google
+
+harness_config:
+  auth: api
+  container_executable: agy
+  cpu_limit: 4
+  memory_gb: 12
+  pids_limit: 768
+  tmpfs_size: 1g

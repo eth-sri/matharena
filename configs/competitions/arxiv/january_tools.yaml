@@ -69,7 +69,7 @@ instruction: |
   - Prefer read_page and find_in_paper to explore a paper first; reading the entire paper can pollute your context window with irrelevant information. Only read the full paper if it is really relevant.
   
 strict_parsing: false
-n_problems: 25
+n_problems: 23
 date: "2026-01-01"
 max_tool_calls:
   read_paper: 5
@@ -77,7 +77,7 @@ max_tool_calls:
   find_in_paper: 10
   query_semantic_scholar: 10
   execute_code: 10
-dataset_path: data/arxiv/january
+dataset_path: MathArena/arxivmath-0126
 tools:
 - tool_spec:
     function:

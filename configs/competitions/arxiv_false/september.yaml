@@ -1,0 +1,40 @@
+instruction: |
+  Try to prove the following statement.
+  You are to really attempt to solve it, regardless of the fact it is open.
+
+  ## Execution environment
+  You have shell commands, Python 3 (`python` and `python3`), Node.js (`node`), and
+  SageMath 9.5 (`sage`). Python includes NumPy, SciPy, SymPy, NetworkX, pandas,
+  scikit-learn, gmpy2, and Z3. Use `sage -c '...'` for Sage expressions, or
+  `sage -python script.py` with `from sage.all import *` for Sage-enabled Python.
+  Sage uses its own Python interpreter; it is not imported from the regular Python venv.
+
+  There is no public internet access or web search. Do not try to access websites,
+  remote APIs, or install packages. `/work` is your writable working directory and starts empty. Installed libraries can be read elsewhere.
+  The main challenge is mathematical reasoning. Therefore, the tools might not even be necessary.
+  Use them only if you think they will help you solve the problem.
+strict_parsing: false
+n_problems: 53
+date: "2026-09-01"
+final_answer: false
+allow_harness: true
+harness_config:
+  max_time_seconds: 43200
+  max_cost_usd: 100
+  cost_limit_grace_seconds: 300
+  cost_limit_grace_prompt: |
+    You have hit the cost budget. You must produce your final answer within the next {cost_limit_grace_minutes} minutes or you will not receive any positive score. Use your existing reasoning and saved work to give the best answer you can now.
+    Your final deadline is {cost_limit_deadline_at} (UTC). You can check the current time with `date -u`. The original overall time limit still applies.
+  time_limit_prompt: |
+    ## Time limit
+    You have at the very most {run_time_limit_hours} hours to finish this question, including tool use and any continuations.
+    This attempt started at {run_started_at}. Your deadline is {run_deadline_at}.
+    These timestamps are in UTC. You can check the current time with `date -u`; submit your final answer before the deadline.
+    Exceeding the time limit counts as incorrect.
+  docker_image: matharena-harness-arxivlean:lean4.31
+  image_enforces_no_new_privileges: true
+  direct_network: false
+  read_only_rootfs: true
+dataset_path: MathArena/brokenarxiv-0926
+judge_configs:
+  - judges/arxiv_judge_gemini_38_flash

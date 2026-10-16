@@ -1,0 +1,35 @@
+model: x-ai/grok-4.7
+api: openrouter
+use_openai_responses_api: true
+# Grok Build supplies the agent loop; OPENROUTER_API_KEY pays for API usage.
+harness: grok
+harness_version: "1.0.40"
+# Per-response ceiling; Grok Build lowers it on reported context overflow.
+max_tokens: 450000
+reasoning_effort: xhigh
+concurrent_requests: 16
+# OpenRouter standard pricing (USD per million tokens), verified 2026-09-21:
+# https://openrouter.ai/api/v1/models/x-ai/grok-4.7/endpoints
+# At >=200k prompt tokens all three rates double; these are base reporting rates.
+read_cost: 1.6
+cache_read_cost: 0.4
+write_cost: 4.8
+extra_body:
+  store: false
+  provider:
+    only: [xai]
+    allow_fallbacks: false
+human_readable_id: Grok 4.7 (xhigh)
+date: "2026-09-21"
+other_params:
+  open: false
+  creator: xAI
+
+harness_config:
+  auth: api
+  container_executable: grok
+  model_context_window: 500000
+  cpu_limit: 4
+  memory_gb: 12
+  pids_limit: 768
+  tmpfs_size: 1g

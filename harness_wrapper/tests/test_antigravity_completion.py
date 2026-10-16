@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from test_agents import FakeProcess, ProcessSequenceFactory, make_agent
 
+from harness_wrapper.tools import CLIProcessError
 from harness_wrapper.harnesses.antigravity_cli import AntigravityCLIAgent
 from harness_wrapper.harnesses.antigravity_cli.adapter import IncompleteAntigravityResponse
 from harness_wrapper.harnesses.antigravity_cli.native_session import read_native_response
@@ -229,3 +230,97 @@ def test_native_read_is_non_mutating_and_respects_step_boundary(tmp_path):
     assert read_native_response(tmp_path, "session-1").text == "Recovered answer"
     assert read_native_response(tmp_path, "session-1", after_step=4) is None
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize('returncode', [0, 1])
+def test_fresh_native_answer_recovers_stale_cli_error_without_resume(tmp_path, returncode):
+    native_database(tmp_path, step=4, answer='Previous answer')
+    stream = line('init') + line(
+        'result', status='ERROR', response='Complete answer',
+        error='The stream was interrupted. Please continue the task you were working on.',
+    )
+    factory = ProcessSequenceFactory(FakeProcess(stdout=stream, returncode=returncode))
+
+    def start(*args, **kwargs):
+        native_database(tmp_path, step=5, answer='Complete answer')
+        return factory(*args, **kwargs)
+
+    agent = make_agent(
+        AntigravityCLIAgent, tmp_path, process_factory=start, max_recovery_attempts=0
+    )
+    events = agent.resume('Continue', session_id='session-1')
+    assert events[-1].content == 'Complete answer'
+    assert events[-1].raw['native_response']['step_index'] == 5
+    assert events[-1].raw['cli_error']['returncode'] == (returncode or 1)
+    assert len(factory.calls) == 1
+    assert not any(event.type == 'recovery' for event in events)
+
+
+def test_nonzero_exit_with_missing_result_recovers_fresh_native_answer(tmp_path):
+    native_database(tmp_path)
+    factory = ProcessSequenceFactory(FakeProcess(stdout=line('init'), returncode=1))
+    agent = make_agent(
+        AntigravityCLIAgent, tmp_path, process_factory=factory, max_recovery_attempts=0
+    )
+    assert agent.run('Solve')[-1].content == 'Recovered answer'
+    assert len(factory.calls) == 1
+
+
+@pytest.mark.parametrize('returncode', [0, 1])
+def test_stale_error_requires_fresh_native_answer(tmp_path, returncode):
+    native_database(tmp_path, answer='Previous answer')
+    stream = line('init') + line(
+        'result', status='ERROR', response='Complete-looking answer', error='Old error'
+    )
+    factory = ProcessSequenceFactory(FakeProcess(stdout=stream, returncode=returncode))
+    agent = make_agent(
+        AntigravityCLIAgent, tmp_path, process_factory=factory, max_recovery_attempts=0
+    )
+    with pytest.raises(CLIProcessError):
+        agent.resume('New task', session_id='session-1')
+    assert len(factory.calls) == 1
+
+
+@pytest.mark.parametrize('status', [1, 2, 8, 9, 11])
+def test_stale_error_cannot_accept_answer_with_unfinished_tool(tmp_path, status):
+    native_database(tmp_path, step=3, step_type=132, status=status)
+    native_database(tmp_path, step=4, answer='I will calculate.')
+    factory = ProcessSequenceFactory(FakeProcess(
+        stdout=line('init') + line('result', status='ERROR', response='I will calculate.', error='Old error'),
+        returncode=1,
+    ))
+    agent = make_agent(
+        AntigravityCLIAgent, tmp_path, process_factory=factory, max_recovery_attempts=0
+    )
+    with pytest.raises(CLIProcessError):
+        agent.run('Solve')
+    assert len(factory.calls) == 1
+
+
+def test_stale_error_cannot_bypass_permission_denial(tmp_path):
+    native_database(tmp_path)
+    factory = ProcessSequenceFactory(FakeProcess(
+        stdout=line('init') + line(
+            'result', status='ERROR', response='Recovered answer', error='Permission denied',
+            denied_actions=[{'action': 'read_file'}],
+        ), returncode=1,
+    ))
+    agent = make_agent(
+        AntigravityCLIAgent, tmp_path, process_factory=factory, max_recovery_attempts=0
+    )
+    with pytest.raises(IncompleteAntigravityResponse, match='permission denial'):
+        agent.run('Solve')
+
+
+def test_stale_error_preserves_complete_answer_with_native_followup(tmp_path):
+    main = 'Full proof.'
+    followup = 'The computation confirms it.'
+    native_database(tmp_path, step=4, answer=followup)
+    factory = ProcessSequenceFactory(FakeProcess(
+        stdout=line('init') + line('result', status='ERROR', response=main+'\n'+followup, error='Old error'),
+        returncode=1,
+    ))
+    agent = make_agent(
+        AntigravityCLIAgent, tmp_path, process_factory=factory, max_recovery_attempts=0
+    )
+    assert agent.run('Solve')[-1].content == main+'\n'+followup

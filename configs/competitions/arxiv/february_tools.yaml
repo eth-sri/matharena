@@ -77,7 +77,7 @@ max_tool_calls:
   find_in_paper: 10
   query_semantic_scholar: 10
   execute_code: 10
-dataset_path: data/arxiv/february
+dataset_path: MathArena/arxivmath-0226
 tools:
 - tool_spec:
     function:

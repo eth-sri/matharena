@@ -1,14 +1,18 @@
-model: glm-5.3
-api: glm
-# OpenCode supplies the agent loop; GLM_API_KEY pays for Z.AI API usage.
+model: z-ai/glm-5.3
+api: openrouter
+# OpenCode supplies the agent loop; OPENROUTER_API_KEY pays for API usage.
 harness: opencode
 harness_version: "1.18.27"
 max_tokens: 131072
-concurrent_requests: 64
+concurrent_requests: 32
 temperature: 1.0
 top_p: 0.95
 reasoning_effort: max
 extra_body:
+  provider:
+    only:
+    - together
+    allow_fallbacks: false
   thinking:
     type: enabled
 cache_read_cost: 0.26
@@ -27,6 +31,8 @@ stream_openai_chat_completions: true
 harness_config:
   auth: api
   container_executable: opencode
+  # Together context limit; reserves output tokens and a 20k compaction buffer.
+  model_context_window: 1048575
   cpu_limit: 4
   memory_gb: 12
   pids_limit: 768

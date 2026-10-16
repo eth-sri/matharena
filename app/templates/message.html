@@ -1,20 +1,17 @@
-
+{% macro message_content(content, code) -%}
+    {% if code %}<pre class="language-python marked code"><code>{{ code }}</code></pre>
+    {% else %}{% if content.text is not none %}<div class="marked">{{ content.text }}</div>{% endif %}{% if content.img is not none %}<img src="{{ content.img }}" class="problem-image">{% endif %}{% endif %}
+{%- endmacro %}
 <div class="message">
     {% if is_cot %}
         <details class="cot-message">
-            <summary class="strong" style="margin-top: 1rem; margin-bottom: 0.5rem;">{{ tagline }}</summary>
-            {% if code %}
-                <pre class="language-python marked box response-box code"><code>{{ code }}</code></pre>
-            {% else %}
-                <div class="box response-box {{ role }}">{% if content.text is not none %}<div class="marked">{{ content.text }}</div>{% endif %}{% if content.img is not none %}<img src="{{ content.img }}" class="problem-image">{% endif %}</div>
-            {% endif %}
+            <summary>{{ tagline }}</summary>
+            <div class="box response-box {{ role }} cot-parts">
+                {% for part in cot_parts %}<div class="cot-part">{{ message_content(part.content, part.code) }}</div>{% endfor %}
+            </div>
         </details>
     {% else %}
-        <div class="strong" style="margin-top: 1rem; margin-bottom: 0.5rem;">{{ tagline }}</div>
-        {% if code %}
-            <pre class="language-python marked box response-box code"><code>{{ code }}</code></pre>
-        {% else %}
-            <div class="box response-box {{ role }}">{% if content.text is not none %}<div class="marked">{{ content.text }}</div>{% endif %}{% if content.img is not none %}<img src="{{ content.img }}" class="problem-image">{% endif %}</div>
-        {% endif %}
+        {% if show_tagline is not defined or show_tagline %}<div class="message-role">{{ tagline }}</div>{% endif %}
+        <div class="box response-box {{ role }} {% if code %}code{% endif %}">{{ message_content(content, code) }}</div>
     {% endif %}
 </div>

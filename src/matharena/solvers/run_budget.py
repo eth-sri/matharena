@@ -8,9 +8,14 @@ from datetime import datetime, timedelta, timezone
 
 from harness_wrapper import Agent, TokenUsage
 
+from matharena.solvers.native_usage import request_usage
+
 
 class RunBudget:
-    def __init__(self, limits, cost_for_usage, *, priced):
+    def __init__(
+        self, limits, cost_for_usage, *, priced, request_level_cost=False,
+        base_cost_for_usage=None, native_usage_reader=None,
+    ):
         self.max_time_seconds = limits.get("max_time_seconds")
         self.max_cost_usd = limits.get("max_cost_usd") if priced else None
         self.cost_limit_grace_seconds = limits.get("cost_limit_grace_seconds")
@@ -36,11 +41,41 @@ class RunBudget:
         self.started_at = datetime.now(timezone.utc)
         self.started = time.monotonic()
         self.cost_for_usage = cost_for_usage
+        self.request_level_cost = request_level_cost
+        self.base_cost_for_usage = base_cost_for_usage or cost_for_usage
+        self.native_usage_reader = native_usage_reader
+        self.cost_estimated = False
         self.reason = None
         self._lock = threading.RLock()
         self._requests = {}
+        self._native_requests = []
         self._request_context = threading.local()
         self._native_usage = TokenUsage()
+
+    @property
+    def has_limits(self):
+        return self.max_time_seconds is not None or self.max_cost_usd is not None
+
+    def cost(self, native=None):
+        """Price request snapshots separately, never a run's cumulative prompt."""
+        with self._lock:
+            total = self.usage(native)
+            if not self.request_level_cost:
+                return self.cost_for_usage(total)
+            requests = list(self._requests.values())
+            if not requests:
+                requests = self._native_requests
+            observed = {
+                name: sum(getattr(usage, name) for usage in requests)
+                for name in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
+            }
+            remaining = TokenUsage(**{
+                name: max(0, getattr(total, name) - observed[name]) for name in observed
+            })
+            self.cost_estimated = any(getattr(remaining, name) for name in observed)
+            # If a CLI exposes only aggregate counts, their request lengths are
+            # unknown. Account for that remainder at base rates and mark it.
+            return sum(self.cost_for_usage(usage) for usage in requests) + self.base_cost_for_usage(remaining)
 
     def prompt_fields(self):
         fields = {"run_started_at": self.started_at.isoformat(timespec="seconds")}
@@ -81,7 +116,7 @@ class RunBudget:
                     + google.get("thoughtsTokenCount", 0),
                     "cache_read_tokens": google.get("cachedContentTokenCount", 0),
                 }
-        usage = Agent._normalize_token_usage(raw_usage)
+        usage = request_usage(raw_usage) if self.request_level_cost else Agent._normalize_token_usage(raw_usage)
         if usage is None:
             return
         with self._lock:
@@ -110,10 +145,14 @@ class RunBudget:
         with self._lock:
             if native is not None:
                 self._native_usage = self._max_usage(self._native_usage, native)
+            requests = list(self._requests.values())
+            if self.request_level_cost and not requests and self.native_usage_reader is not None:
+                self._native_requests = self.native_usage_reader.usages()
+                requests = self._native_requests
             provider = TokenUsage(
                 **{
                     field: sum(
-                        getattr(usage, field) for usage in self._requests.values()
+                        getattr(usage, field) for usage in requests
                     )
                     for field in (
                         "input_tokens",
@@ -141,7 +180,7 @@ class RunBudget:
                         self.reason = "cost_grace_timeout"
                 elif (
                     self.max_cost_usd is not None
-                    and self.cost_for_usage(self.usage()) >= self.max_cost_usd
+                    and self.cost() >= self.max_cost_usd
                 ):
                     self.reason = "cost_limit"
             return self.reason is not None

@@ -1,0 +1,16 @@
+{% macro money(value, estimated=false) -%}
+<span class="money">{% if value is not none %}${{ value }}{% else %}—{% endif %}</span>{% if estimated %}<abbr class="estimate" title="Includes estimated token usage and cost">est.</abbr>{% endif %}
+{%- endmacro %}
+
+{% macro accuracy(stat) -%}
+<div class="accuracy-cell">
+    <span class="accuracy-number">{{ stat.avg_accuracy }}</span>
+    {% if stat.accuracy_value is not none %}<span class="accuracy-track" aria-hidden="true"><span style="width: {{ [0, [stat.accuracy_value, 100] | min] | max }}%"></span></span>{% endif %}
+</div>
+{% if stat.n_pending %}<span class="pending-label">{{ stat.n_pending }} pending</span>{% endif %}
+{%- endmacro %}
+
+{% macro outcomes(ticks) -%}
+{% set labels = {'✅': ('✓', 'correct', 'Correct'), '❌': ('×', 'incorrect', 'Incorrect'), '🟨': ('◐', 'partial', 'Partial credit'), '❔': ('?', 'pending', 'Pending grade'), '❕': ('!', 'warning', 'Warning'), '⚠': ('!', 'warning', 'High warning'), '💀': ('!', 'critical', 'Critical warning'), '🤖': ('A', 'annotation', 'LLM annotation')} %}
+<span class="result-ticks">{% for tick in ticks | replace('️', '') %}{% if tick in labels %}{% set item = labels[tick] %}<span class="result-tick {{ item[1] }}" title="Run {{ loop.index0 }}: {{ item[2] }}" aria-label="{{ item[2] }}">{{ item[0] }}</span>{% endif %}{% endfor %}</span>
+{%- endmacro %}

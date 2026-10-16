@@ -855,7 +855,7 @@ def configure_source_mode(args, *, false_model_default: str = "openai/gpt-6-astr
 def validate_source_model(config: dict[str, Any], *, false_mode: bool) -> None:
     if false_mode and (
         config.get("harness") not in {"codex", "codex-cli", "openai-codex"}
-        or not re.match(r"^gpt-6(?:[.-]|$)", str(config.get("model", "")))
+        or not re.match(r"^(?:openai/)?gpt-6(?:[.-]|$)", str(config.get("model", "")))
     ):
         raise SourceStateError("BrokenArXiv requires a GPT-6 Codex harness configuration")
 

@@ -7,6 +7,7 @@ import tempfile
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import closing
 from datetime import datetime
 
 import anthropic
@@ -25,6 +26,7 @@ from tqdm import tqdm
 from transformers import AutoTokenizer
 
 from matharena.request_logger import request_logger
+from matharena.token_pricing import TokenPricing
 from matharena.utils import check_for_extra_keys
 
 try:
@@ -74,14 +76,17 @@ class APIClient:
         max_tokens_param="max_tokens",
         reasoning_effort=None,
         batch_processing=False,
+        batch_max_tokens=None,
         use_openai_responses_api=False,
         use_gdm_tools=False,
+        use_google_genai=False,
         stream_openai_chat_completions=False,
         stream_openai_responses=False,
         max_tool_calls=0,
         cache_write_cost=0,
         tools=None,
         anthropic_betas=None,
+        long_context_pricing=None,
         **kwargs,
     ):
         """Initializes the APIClient object and params. All prompts are set at run_queries invocation.
@@ -92,7 +97,7 @@ class APIClient:
             max_tokens (int, optional): The maximum number of tokens to generate. Defaults to None.
             api (str, optional): The API to use. Defaults to 'openai'.
             default_headers (dict, optional): Default headers to send with OpenAI-compatible clients.
-            max_retries (int, optional): The maximum number of retries for a failed query. Defaults to 50.
+            max_retries (int, optional): The maximum number of outer attempts for a failed query. Defaults to 3.
             concurrent_requests (int, optional): The number of concurrent requests to make. Defaults to 30.
             no_system_messages (bool, optional): Whether to disable system messages. Defaults to False.
             read_cost (int, optional): The cost of reading a token. Defaults to 1.
@@ -104,12 +109,16 @@ class APIClient:
             max_tokens_param (str, optional): The name of the max_tokens parameter for the API. Defaults to "max_tokens".
             reasoning_effort (str, optional): The reasoning effort to use. Defaults to None.
             batch_processing (bool, optional): Whether to use batch processing. Defaults to False.
+            batch_max_tokens (int, optional): Output cap for OpenRouter batches; leaves synchronous max_tokens unchanged.
             use_openai_responses_api (bool, optional): Whether to use OpenAI responses. Defaults to False.
+            use_google_genai (bool, optional): Use native Gemini with automatic long-decode continuation.
             stream_openai_chat_completions (bool, optional): Whether to stream OpenAI chat completions internally.
             stream_openai_responses (bool, optional): Whether to stream Responses internally, retaining the final response.
             max_tool_calls (int|dict, optional): The maximum number of tool calls to make. Defaults to 0.
                 Could also be a dict that specifies max calls per tool name.
             tools (list, optional): A list of tools to use. Defaults to None.
+            long_context_pricing (dict, optional): Higher per-million-token prices for
+                requests exceeding input_token_threshold, including cached input.
             **kwargs: Additional keyword arguments for the API.
         """
         # Max tool calls
@@ -129,8 +138,8 @@ class APIClient:
         if "--" in model:
             model, reasoning_effort = model.split("--")
             logger.info(f"Model: {model}, Reasoning effort: {reasoning_effort}")
-        if (api not in ["anthropic", "openai"] or self.tool_calls_allowed) and batch_processing:
-            logger.warning("Batch processing is only supported for the Anthropic API and OpenAI API without tool calling.")
+        if (api not in ["anthropic", "openai", "openrouter"] or self.tool_calls_allowed) and batch_processing:
+            logger.warning("Batch processing requires OpenAI, Anthropic, or OpenRouter without tool calling.")
             batch_processing = False
         if ("o1" in model or "o3" in model or "o4" in model or "gpt-5" in model) and api == "openai":
             logger.info("Not using system messages for o1/o3/o4 model.")
@@ -161,11 +170,18 @@ class APIClient:
         self.read_cost = read_cost
         self.cache_read_cost = read_cost if cache_read_cost is None else cache_read_cost
         self.write_cost = write_cost
+        self.pricing = TokenPricing(read_cost, write_cost, cache_read_cost, cache_write_cost, long_context_pricing)
         self.background = background
         self.batch_processing = batch_processing
+        self.batch_max_tokens = batch_max_tokens
+        if batch_processing and api == "openrouter" and not model.startswith("anthropic/"):
+            raise ValueError("OpenRouter batching currently supports Anthropic models only")
+        if batch_max_tokens is not None and (not isinstance(batch_max_tokens, int) or batch_max_tokens < 1):
+            raise ValueError("batch_max_tokens must be a positive integer")
         self.anthropic_betas = anthropic_betas or []
         self.use_openai_responses_api = use_openai_responses_api
         self.use_gdm_tools = use_gdm_tools
+        self.use_google_genai = use_google_genai
         self.use_google_internal_tools = False
         self.stream_openai_chat_completions = stream_openai_chat_completions
         self.stream_openai_responses = stream_openai_responses
@@ -275,7 +291,9 @@ class APIClient:
             self.base_url = "https://api.together.xyz/v1"
         elif self.api == "google":
             self.api_key = os.getenv("GOOGLE_API_KEY")
-            if self.tool_calls_allowed and (
+            if self.use_google_genai:
+                self.api = "google"
+            elif self.tool_calls_allowed and (
                 "gdm-eval-model-bcn" in self.model
                 or self.use_gdm_tools
             ):
@@ -339,7 +357,7 @@ class APIClient:
     class InternalRequestResult:
         """A class to hold the result of a request internally (below run_queries)."""
 
-        def __init__(self, conversation, input_tokens, output_tokens, cached_input_tokens=0, cached_write_tokens=0, n_retries=0, time=0):
+        def __init__(self, conversation, input_tokens, output_tokens, cached_input_tokens=0, cached_write_tokens=0, n_retries=0, time=0, cost=None):
             self.conversation = conversation
             self.input_tokens = input_tokens
             self.output_tokens = output_tokens
@@ -347,6 +365,7 @@ class APIClient:
             self.cached_write_tokens = cached_write_tokens
             self.n_retries = n_retries
             self.time = time
+            self.cost = cost
 
     def run_queries(self, queries, no_tqdm=False, ignore_tool_calls=False, custom_indices=None):
         """Only entry point: runs a given list of queries through the API.
@@ -362,6 +381,7 @@ class APIClient:
                 idx: Integer index of the query this response corresponds to in [0, len(queries)-1].
                 conversation: Full list of messages (including those from the query) in the API format (incl. CoT).
                 detailed_cost: A dict with total "cost" ($), "input_tokens", "output_tokens", and "time" (seconds).
+                    "request_failed" is True when retries produced no result; this must not be graded as an answer.
         """
         if not no_tqdm:
             logger.info(f"Running {len(queries)} queries.")
@@ -387,19 +407,20 @@ class APIClient:
             start_time = time.time()
             if self.api == "openai":
                 results_batch = self._openai_batch_processing(queries, indices)
+            elif self.api == "openrouter":
+                results_batch = self._openrouter_batch_processing(queries, indices)
             elif self.anthropic_betas:
                 results_batch = self._anthropic_batch_processing_beta(queries, indices)
             else:
                 results_batch = self._anthropic_batch_processing(queries, indices)
             end_time = time.time()  # pack all time into first index (since batch)
             for idx, result in enumerate(results_batch):
+                request_failed = result is None
                 if result is None:
                     conversation = [m.copy() for m in queries[idx]] + [{"role": "assistant", "content": ""}]
                     result = self.InternalRequestResult(conversation, input_tokens=0, output_tokens=0)
                 detailed_cost = {
-                    "cost": self._get_cost(
-                        result.input_tokens, result.output_tokens, result.cached_input_tokens, result.cached_write_tokens
-                    ),
+                    "cost": self._result_cost(result, batch=True) * (0.5 if self.api == "openrouter" else 1),
                     "input_tokens": result.input_tokens,
                     "cached_input_tokens": result.cached_input_tokens,
                     "cached_write_tokens": result.cached_write_tokens,
@@ -407,6 +428,8 @@ class APIClient:
                     "time": end_time - start_time,
                     "n_retries": result.n_retries,
                 }
+                if request_failed:
+                    detailed_cost["request_failed"] = True
                 yield idx, result.conversation, detailed_cost
             return
 
@@ -425,13 +448,12 @@ class APIClient:
             for future in iterator:
                 idx = future_to_index[future]
                 result = future.result()
+                request_failed = result is None
                 if result is None:
                     conversation = [m.copy() for m in queries[idx]] + [{"role": "assistant", "content": ""}]
                     result = self.InternalRequestResult(conversation, input_tokens=0, output_tokens=0)
                 detailed_cost = {
-                    "cost": self._get_cost(
-                        result.input_tokens, result.output_tokens, result.cached_input_tokens
-                    ),
+                    "cost": self._result_cost(result),
                     "input_tokens": result.input_tokens,
                     "cached_input_tokens": result.cached_input_tokens,
                     "cached_write_tokens": result.cached_write_tokens,
@@ -440,6 +462,8 @@ class APIClient:
                     "time": time.time() - start_time,
                     "request_time": result.time,
                 }
+                if request_failed:
+                    detailed_cost["request_failed"] = True
                 yield idx, result.conversation, detailed_cost
 
     def _validate_and_prepare_query(self, query):
@@ -556,19 +580,30 @@ class APIClient:
 
         cached_input_tokens = min(max(cached_input_tokens, 0), max(input_tokens, 0))
         cached_creation_input_tokens = usage_dict.get("cache_creation_input_tokens", 0)
+        if self.pricing.threshold is not None:
+            included_cache_writes = (
+                usage_dict.get("cache_write_input_tokens")
+                or input_details.get("cache_write_tokens")
+                or input_details.get("cache_write_input_tokens")
+                or prompt_details.get("cache_write_tokens")
+                or prompt_details.get("cache_write_input_tokens")
+                or 0
+            )
+            if included_cache_writes:
+                cached_creation_input_tokens = included_cache_writes
+                input_tokens = max(0, input_tokens - included_cache_writes)
         return input_tokens, output_tokens, cached_input_tokens, cached_creation_input_tokens
 
     def _get_cost(self, input_tokens, output_tokens, cached_input_tokens=0, cached_creation_input_tokens=0):
-        input_tokens = max(input_tokens, 0)
-        output_tokens = max(output_tokens, 0)
-        cached_input_tokens = min(max(cached_input_tokens, 0), input_tokens)
-        uncached_input_tokens = input_tokens - cached_input_tokens
-        return (
-            uncached_input_tokens * self.read_cost
-            + cached_input_tokens * self.cache_read_cost
-            + output_tokens * self.write_cost
-            + cached_creation_input_tokens * self.cache_write_cost
-        ) / 1e6
+        return self.pricing.cost(input_tokens, output_tokens, cached_input_tokens, cached_creation_input_tokens)
+
+    def _result_cost(self, result, *, batch=False):
+        if result.cost is not None:
+            return result.cost
+        # A batch item/streamed reply is one request. Tool loops price their
+        # individual responses before combining token counts.
+        cache_writes = result.cached_write_tokens if batch or self.pricing.threshold is not None else 0
+        return self._get_cost(result.input_tokens, result.output_tokens, result.cached_input_tokens, cache_writes)
 
     def _get_messages_from_anthropic_content(self, content):
         """Postprocesses the content from an Anthropic API query.
@@ -695,6 +730,178 @@ class APIClient:
     """
         Case 2: Batch API
     """
+
+    def _openrouter_batch_processing(self, queries, indices):
+        """Run Anthropic Messages batches through OpenRouter, retrying only failed items.
+
+        A created batch is never resubmitted because polling failed: it may still
+        be running. Its ID is recorded in each request log for later retrieval.
+        """
+        results = [None] * len(queries)
+        if not queries:
+            return results
+        params = self.kwargs.copy()
+        extra = dict(params.pop("extra_body", {}))
+        provider = extra.pop("provider", {})
+        params.update(extra)
+        effort = params.pop("reasoning_effort", None)
+        if effort is not None:
+            params.setdefault("thinking", {"type": "adaptive"})
+            params["output_config"] = {**params.get("output_config", {}), "effort": effort}
+        for key in ("max_tokens", "max_completion_tokens", "max_output_tokens"):
+            params.pop(key, None)
+        params["max_tokens"] = self.batch_max_tokens or self.max_tokens
+        if not params["max_tokens"]:
+            raise ValueError("OpenRouter Messages batches require max_tokens or batch_max_tokens")
+
+        headers = {**(self.default_headers or {}), "Authorization": f"Bearer {self.api_key}"}
+        if self.anthropic_betas:
+            headers["anthropic-beta"] = ",".join(self.anthropic_betas)
+        url = self.base_url.rstrip("/") + "/batches"
+        pending = list(range(len(queries)))
+        with requests.Session() as session:
+            session.headers.update(headers)
+            for retry_idx in range(self.max_retries):
+                ts = datetime.now().strftime("%m%d-%H:%M:%S.%f")
+                items = []
+                for local_idx in pending:
+                    api_idx = indices[local_idx]
+                    system, messages = self._convert_to_anthropic_messages(queries[local_idx])
+                    body = {"messages": messages, **params}
+                    if system is not anthropic.NOT_GIVEN:
+                        body["system"] = system
+                    item = {"custom_id": f"apiquery-{api_idx}", "body": body}
+                    items.append(item)
+                    request_logger.log_request(
+                        ts=ts, batch_idx=api_idx, request=item,
+                        model=self.model, endpoint="/v1/messages", provider=provider.get("only"),
+                        anthropic_betas=self.anthropic_betas, n_retries=retry_idx,
+                    )
+                # OpenRouter stream-parses JSON: all batch options must precede requests.
+                payload = {"endpoint": "/v1/messages", "model": self.model,
+                           "completion_window": "24h"}
+                # Batch routing accepts only `only`; sync preferences stay on the sync path.
+                if provider.get("only"):
+                    payload["provider"] = {"only": provider["only"]}
+                payload["requests"] = items
+                try:
+                    response = session.post(url, json=payload, timeout=self.timeout)
+                    response.raise_for_status()
+                    batch = response.json()
+                    if not isinstance(batch, dict) or not isinstance(batch.get("id"), str):
+                        raise ValueError("Invalid OpenRouter batch acknowledgement")
+                    batch_id = batch["id"]
+                except requests.HTTPError as exc:
+                    status = exc.response.status_code
+                    logger.error(f"OpenRouter batch submission failed ({status}): {exc.response.text}")
+                    for local_idx in pending:
+                        request_logger.log_response(ts=ts, batch_idx=indices[local_idx],
+                                                    response={"http_status": status, "error": exc.response.text})
+                    if status != 429 and status < 500:
+                        break
+                    if retry_idx + 1 < self.max_retries:
+                        time.sleep(self.sleep_on_error)
+                    continue
+                except (requests.RequestException, ValueError, KeyError) as exc:
+                    # A timeout or malformed acknowledgement may hide an accepted batch.
+                    logger.error(f"OpenRouter batch submission outcome is unknown; not resubmitting: {exc}")
+                    for local_idx in pending:
+                        request_logger.log_response(ts=ts, batch_idx=indices[local_idx],
+                                                    response={"submission_error": str(exc)})
+                    break
+                logger.info(f"Running {len(pending)} queries with OpenRouter batch ID {batch_id}")
+                for local_idx in pending:
+                    request_logger.log_response(ts=ts, batch_idx=indices[local_idx],
+                                                batch_id=batch_id, batch_status=batch.get("status"))
+                try:
+                    batch = self._wait_for_openrouter_batch(session, url, batch)
+                except (requests.RequestException, ValueError, KeyError, RuntimeError) as exc:
+                    logger.error(f"Could not retrieve OpenRouter batch {batch_id}; not resubmitting it: {exc}")
+                    for local_idx in pending:
+                        request_logger.log_response(ts=ts, batch_idx=indices[local_idx],
+                                                    batch_id=batch_id, polling_error=str(exc))
+                    break
+                if batch["status"] != "completed":
+                    logger.error(f"OpenRouter batch {batch_id} ended as {batch['status']}: {batch.get('error')}")
+                    for local_idx in pending:
+                        request_logger.log_response(ts=ts, batch_idx=indices[local_idx],
+                                                    response=batch, batch_id=batch_id)
+                    if batch["status"] == "cancelled":
+                        break
+                else:
+                    index_map = {indices[i]: i for i in pending}
+                    seen = set()
+                    for item in batch.get("results") or []:
+                        try:
+                            api_idx, local_idx = self._lookup_apiquery_local_idx(item["custom_id"], index_map)
+                            if api_idx in seen:
+                                raise ValueError(f"Duplicate custom_id: {item['custom_id']}")
+                            seen.add(api_idx)
+                        except (KeyError, ValueError, TypeError) as exc:
+                            logger.error(f"Unexpected OpenRouter batch result: {exc}")
+                            continue
+                        request_logger.log_response(ts=ts, batch_idx=api_idx, response=item, batch_id=batch_id)
+                        try:
+                            reply = item.get("response") or {}
+                            if item.get("error") or reply.get("status_code") != 200:
+                                raise ValueError(item.get("error") or reply)
+                            body = reply["body"]
+                            if not isinstance(body, dict) or body.get("error") or body.get("type") != "message":
+                                raise ValueError(f"Invalid Messages response: {body}")
+                            message = anthropic.types.Message.model_validate(body)
+                            if message.stop_reason not in {"end_turn", "stop_sequence", "max_tokens", "refusal"}:
+                                raise ValueError(f"Unexpected stop reason: {message.stop_reason}")
+                            messages = self._get_messages_from_anthropic_content(message.content)
+                            if not any(m.get("type") == "response" for m in messages):
+                                messages.append({"role": "assistant", "type": "response", "content": ""})
+                            usage = self._extract_usage_tokens(message.usage)
+                            results[local_idx] = self.InternalRequestResult(
+                                [m.copy() for m in queries[local_idx]] + messages, usage[0], usage[1],
+                                cached_input_tokens=usage[2], cached_write_tokens=usage[3], n_retries=retry_idx,
+                            )
+                        except (KeyError, ValueError, TypeError) as exc:
+                            logger.error(f"OpenRouter batch item {item['custom_id']} failed: {exc}")
+                pending = [i for i in pending if results[i] is None]
+                if not pending:
+                    break
+                if retry_idx + 1 < self.max_retries:
+                    logger.warning(f"Retrying {len(pending)} failed OpenRouter batch items")
+                    time.sleep(self.sleep_on_error)
+        return results
+
+    def _wait_for_openrouter_batch(self, session, url, batch):
+        """Poll one known batch, tolerating initial 404s without creating another."""
+        batch_id = batch["id"]
+        deadline = time.monotonic() + 24 * 60 * 60 + 5 * 60
+        errors = 0
+        previous_progress = None
+        while batch["status"] not in {"completed", "failed", "cancelled", "expired"}:
+            if batch["status"] not in {"validating", "in_progress", "finalizing", "cancelling"}:
+                raise ValueError(f"Unknown OpenRouter batch status: {batch['status']}")
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"Batch {batch_id} exceeded its 24-hour completion window")
+            progress = (batch["status"], batch.get("request_counts"))
+            if progress != previous_progress:
+                previous_progress = progress
+                logger.info(f"OpenRouter batch {batch_id}: {progress[0]}, {progress[1]}")
+            time.sleep(10)
+            try:
+                response = session.get(f"{url}/{batch_id}", timeout=self.timeout)
+                response.raise_for_status()
+                polled = response.json()
+                if not isinstance(polled, dict) or "status" not in polled or polled.get("id") != batch_id:
+                    raise ValueError("Invalid OpenRouter batch status response")
+                batch = polled
+                errors = 0
+            except (requests.RequestException, ValueError) as exc:
+                errors += 1
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                if status is not None and status not in {404, 429} and status < 500:
+                    raise
+                if errors >= self.max_retries_inner:
+                    raise
+                logger.warning(f"Error polling OpenRouter batch {batch_id} ({errors}): {exc}")
+        return batch
 
     def _openai_batch_processing(self, queries, indices, retry_idx=0):
         """Processes a batch of queries  using the OpenAI API.
@@ -1121,6 +1328,8 @@ class APIClient:
             InternalRequestResult or None
         """
         if self.api == "google":
+            if self.use_google_genai:
+                return self._google_genai_query(idx, query)
             return self._google_query_with_internal_tools(idx, query)
         if self.api == "openai":
             return self._openai_query_with_tools(idx, query, ignore_tool_calls=ignore_tool_calls)
@@ -1328,6 +1537,7 @@ class APIClient:
         cached_input_tokens = 0
         cached_write_tokens = 0
         total_retries = 0
+        request_cost = 0.0
 
         while not self.terminated:
             response = None
@@ -1359,6 +1569,7 @@ class APIClient:
                 raise ValueError("Max inner retries reached.")
 
             step_input, step_output, step_cached_input, step_write_cache = self._extract_usage_tokens(response.usage)
+            request_cost += self._get_cost(step_input, step_output, step_cached_input, step_write_cache)
             input_tokens += step_input
             output_tokens += step_output
             cached_input_tokens += step_cached_input
@@ -1413,6 +1624,7 @@ class APIClient:
                             output, additional_cost = output
                             input_tokens += additional_cost["input_tokens"]
                             output_tokens += additional_cost["output_tokens"]
+                            request_cost += self._get_cost(additional_cost["input_tokens"], additional_cost["output_tokens"])
                         nb_executed_tool_calls[tool_key] += 1
 
                 nb_tool_calls_left = max_tool_calls.get("any", 0) - nb_executed_tool_calls.get("any", 0)
@@ -1467,6 +1679,7 @@ class APIClient:
             cached_input_tokens=cached_input_tokens,
             cached_write_tokens=cached_write_tokens,
             n_retries=total_retries,
+            cost=request_cost if self.pricing.threshold is not None else None,
         )
 
     def _openai_query_with_tools(self, idx, query, is_together=False, ignore_tool_calls=False):
@@ -1503,6 +1716,14 @@ class APIClient:
         if isinstance(response, dict):
             return Response.model_construct(**response)
         return response
+
+    @staticmethod
+    def _check_responses_error(response):
+        """Compatible providers can return a failed Response inside HTTP 200."""
+        error = getattr(response, "error", None)
+        status = getattr(response, "status", None)
+        if error or status in {"failed", "cancelled"}:
+            raise ValueError(f"Responses API failed (status={status}): {error}")
 
     def _openai_query_responses_api(self, client, idx, messages, ignore_tool_calls=False):
         """Queries the OpenAI API with the responses API.
@@ -1541,7 +1762,9 @@ class APIClient:
         input_tokens = 0
         output_tokens = 0
         cached_input_tokens = 0
+        cached_write_tokens = 0
         total_retries = 0
+        request_cost = 0.0
 
         for _ in range(total_max_tool_calls + 1):
             # Inner retry to get a response
@@ -1588,13 +1811,10 @@ class APIClient:
                             response = self._normalize_openai_response(client.responses.retrieve(response.id))
                             if time.time() - time_start > self.timeout:
                                 raise TimeoutError("Timeout waiting for background response.")
-                        request_logger.log_response(ts=ts, batch_idx=idx, response=response.model_dump())
-                        try:
-                            response.usage.input_tokens
-                        except:
-                            raise ValueError("No usage info in response -> if in background, this mean exception occured.")
-                    else:
-                        request_logger.log_response(ts=ts, batch_idx=idx, response=response.model_dump())
+                    request_logger.log_response(ts=ts, batch_idx=idx, response=response.model_dump())
+                    self._check_responses_error(response)
+                    if self.background and response.usage is None:
+                        raise ValueError("No usage info in background response.")
                 except Exception as e:
                     if "rate limit" not in str(e).lower() and "429" not in str(e):
                         total_retries += 1
@@ -1610,10 +1830,12 @@ class APIClient:
                 raise ValueError("Max inner retries reached.")
 
             # Update state: token counts and conversation (potentially execute tool calls)
-            step_input, step_output, step_cached_input, _ = self._extract_usage_tokens(response.usage)
+            step_input, step_output, step_cached_input, step_cache_write = self._extract_usage_tokens(response.usage)
+            request_cost += self._get_cost(step_input, step_output, step_cached_input, step_cache_write)
             input_tokens += step_input
             output_tokens += step_output
             cached_input_tokens += step_cached_input
+            cached_write_tokens += step_cache_write
 
             was_tool_call_executed = False
             for out in response.output:
@@ -1657,6 +1879,7 @@ class APIClient:
                         additional_cost = output[1]
                         input_tokens += additional_cost["input_tokens"]
                         output_tokens += additional_cost["output_tokens"]
+                        request_cost += self._get_cost(additional_cost["input_tokens"], additional_cost["output_tokens"])
                         output = output[0]
                     conversation.append(
                         {
@@ -1716,8 +1939,22 @@ class APIClient:
             input_tokens,
             output_tokens,
             cached_input_tokens=cached_input_tokens,
+            cached_write_tokens=cached_write_tokens,
             n_retries=total_retries,
+            cost=request_cost if self.pricing.threshold is not None else None,
         )
+
+    @staticmethod
+    def _check_chat_completion_error(response):
+        """HTTP 200 can still carry an upstream error, including inside a choice."""
+        error = getattr(response, "error", None)
+        for choice in getattr(response, "choices", None) or []:
+            choice_error = getattr(choice, "error", None)
+            if choice_error or getattr(choice, "finish_reason", None) == "error":
+                error = choice_error or {"message": "Provider ended the completion with finish_reason=error"}
+                break
+        if error:
+            raise RuntimeError(f"Upstream Chat Completions error: {json.dumps(error, ensure_ascii=False)}")
 
     def _openai_query_chat_completions_api(self, client, idx, messages, ignore_tool_calls=False):
         """Queries the OpenAI API using chat completions API.
@@ -1750,7 +1987,9 @@ class APIClient:
         input_tokens = 0
         output_tokens = 0
         cached_input_tokens = 0
+        cached_write_tokens = 0
         total_retries = 0
+        request_cost = 0.0
         max_output_tokens = self.kwargs.get(self.max_tokens_param, None)
 
         # As long as we just had a tool response do another request
@@ -1798,11 +2037,19 @@ class APIClient:
             if response is None:
                 raise ValueError("Max inner retries reached.")
 
+            # A provider may fail after HTTP 200, returning partial text plus an error.
+            # Keep the raw response log, but let the outer retry discard this attempt.
+            self._check_chat_completion_error(response)
+            if not response.choices:
+                raise RuntimeError("Chat completion returned no choices")
+
             # Update state: token counts and conversation (potentially execute tool calls)
-            step_input, step_output, step_cached_input, _ = self._extract_usage_tokens(response.usage)
+            step_input, step_output, step_cached_input, step_cache_write = self._extract_usage_tokens(response.usage)
+            request_cost += self._get_cost(step_input, step_output, step_cached_input, step_cache_write)
             input_tokens += step_input
             output_tokens += step_output
             cached_input_tokens += step_cached_input
+            cached_write_tokens += step_cache_write
             message = response.choices[0].message
             if self.context_limit is not None:
                 max_output_tokens = self.context_limit
@@ -1814,28 +2061,31 @@ class APIClient:
                 max_output_tokens = self.kwargs.get(self.max_tokens_param, None)
             # Add CoT and rest of message separately
             # TODO: if we notice new ways to return CoT they should be mangled here. Likely missing something.
+            has_reasoning_text = False
             if hasattr(message, "reasoning_details") and message.reasoning_details:
                 for detail in message.reasoning_details:
                     if isinstance(detail, dict):
                         type_ = detail.get("type", "")
                         text_ = detail.get("text", "")
-                        sumary_ = detail.get("sumary", "")
+                        summary_ = detail.get("summary", "")
                     else:
                         type_ = detail.type
-                        text_ = detail.text
-                        sumary_ = detail.sumary
+                        text_ = getattr(detail, "text", "")
+                        summary_ = getattr(detail, "summary", "")
                     if type_ == "reasoning.text":
-                        conversation.append({"role": "assistant", "type": "cot", "content": text_})
+                        content = text_
                     elif type_ == "reasoning.summary":
-                        conversation.append({"role": "assistant", "type": "cot", "content": sumary_})
+                        content = summary_
                     else:
-                        pass  # encrypted
-            else:
-                # Reasoning details trumps others as there is repetition
-                if hasattr(message, "reasoning") and message.reasoning:
-                    conversation.append({"role": "assistant", "type": "cot", "content": message.reasoning})
-                if hasattr(message, "reasoning_content") and message.reasoning_content:
-                    conversation.append({"role": "assistant", "type": "cot", "content": message.reasoning_content})
+                        continue  # encrypted
+                    if content:
+                        conversation.append({"role": "assistant", "type": "cot", "content": content})
+                        has_reasoning_text = True
+            if not has_reasoning_text:
+                # Encrypted-only details must not suppress the readable fallback.
+                reasoning = getattr(message, "reasoning", None) or getattr(message, "reasoning_content", None)
+                if reasoning:
+                    conversation.append({"role": "assistant", "type": "cot", "content": reasoning})
 
             message_dict = message.model_dump()
             message_dict = {k: v for k, v in message_dict.items() if v is not None}  # Drop nulls
@@ -1876,6 +2126,7 @@ class APIClient:
                             output, extra_cost = output
                             input_tokens += extra_cost["input_tokens"]
                             output_tokens += extra_cost["output_tokens"]
+                            request_cost += self._get_cost(extra_cost["input_tokens"], extra_cost["output_tokens"])
 
                         nb_executed_tool_calls[tool_key] += 1
 
@@ -1906,7 +2157,9 @@ class APIClient:
             input_tokens,
             output_tokens,
             cached_input_tokens=cached_input_tokens,
+            cached_write_tokens=cached_write_tokens,
             n_retries=total_retries,
+            cost=request_cost if self.pricing.threshold is not None else None,
         )
 
     def _openai_query_chat_completions_streaming(self, client, idx, messages):
@@ -1918,6 +2171,7 @@ class APIClient:
         input_tokens = 0
         output_tokens = 0
         cached_input_tokens = 0
+        cached_write_tokens = 0
         total_retries = 0
         max_output_tokens = self.kwargs.get(self.max_tokens_param, None)
 
@@ -1963,31 +2217,73 @@ class APIClient:
         text_parts = []
         reasoning_parts = []
         final_usage = None
-        for event in response:
-            if getattr(event, "usage", None) is not None:
-                final_usage = event.usage
-            if not getattr(event, "choices", None):
-                continue
-            delta = event.choices[0].delta
-            if getattr(delta, "content", None):
-                text_parts.append(delta.content)
-            if getattr(delta, "reasoning", None):
-                reasoning_parts.append(delta.reasoning)
+        generation_id = None
+        provider = None
+        finish_reason = None
+        try:
+            with closing(response):
+                for event in response:
+                    generation_id = getattr(event, "id", None) or generation_id
+                    provider = getattr(event, "provider", None) or provider
+                    if getattr(event, "usage", None) is not None:
+                        final_usage = event.usage
+                    self._check_chat_completion_error(event)
+                    if not getattr(event, "choices", None):
+                        continue
+                    choice = event.choices[0]
+                    finish_reason = getattr(choice, "finish_reason", None) or finish_reason
+                    delta = choice.delta
+                    if getattr(delta, "content", None):
+                        text_parts.append(delta.content)
+                    reasoning_delta = getattr(delta, "reasoning", None) or getattr(delta, "reasoning_content", None)
+                    if reasoning_delta:
+                        reasoning_parts.append(reasoning_delta)
+            if finish_reason is None:
+                raise RuntimeError("Chat completion stream ended without a finish reason (incomplete response)")
+        except Exception as e:
+            # The SDK raises APIError while iterating an SSE error event, after
+            # create() has succeeded. Preserve diagnostics before the outer retry.
+            error_body = getattr(e, "body", None)
+            request_logger.log_response(
+                ts=ts,
+                batch_idx=idx,
+                response={
+                    "streamed": True,
+                    "exception": str(e),
+                    "error": error_body,
+                    "id": generation_id,
+                    "provider": provider,
+                    "finish_reason": finish_reason,
+                    "partial_content": "".join(text_parts),
+                    "partial_reasoning": "".join(reasoning_parts),
+                    "usage": self._usage_to_dict(final_usage) if final_usage is not None else None,
+                },
+            )
+            logger.warning(
+                "Chat stream failed: model={}, batch_idx={}, generation_id={}, provider={}, "
+                "content_chars={}, reasoning_chars={}, error={}, error_body={}",
+                self.model, idx, generation_id, provider,
+                sum(map(len, text_parts)), sum(map(len, reasoning_parts)), str(e), error_body,
+            )
+            raise
 
         reasoning = "".join(reasoning_parts)
         if reasoning:
             conversation.append({"role": "assistant", "type": "cot", "content": reasoning})
-        content = "".join(text_parts)   
+        content = "".join(text_parts)
         conversation.append({"role": "assistant", "content": content})
 
         if final_usage is not None:
-            input_tokens, output_tokens, cached_input_tokens, _ = self._extract_usage_tokens(final_usage)
+            input_tokens, output_tokens, cached_input_tokens, cached_write_tokens = self._extract_usage_tokens(final_usage)
 
         request_logger.log_response(
             ts=ts,
             batch_idx=idx,
             response={
                 "streamed": True,
+                "id": generation_id,
+                "provider": provider,
+                "finish_reason": finish_reason,
                 "content": content,
                 "reasoning": reasoning,
                 "usage": final_usage.model_dump() if final_usage is not None else None,
@@ -1999,6 +2295,7 @@ class APIClient:
             input_tokens,
             output_tokens,
             cached_input_tokens=cached_input_tokens,
+            cached_write_tokens=cached_write_tokens,
             n_retries=total_retries,
         )
 
@@ -2021,6 +2318,61 @@ class APIClient:
                 del new_message["reasoning_content"]
             cleaned_conversation.append(new_message)
         return cleaned_conversation
+
+    def _google_genai_query(self, idx, messages):
+        """Use the native SDK to continue long decodes and retain cumulative usage."""
+        from google import genai
+
+        if self.tool_calls_allowed or any(not isinstance(m.get("content", ""), str) for m in messages):
+            raise ValueError("Native Google GenAI queries currently support text without tools")
+        contents = [
+            {"role": "model" if m["role"] == "assistant" else m["role"],
+             "parts": [{"text": m.get("content", "")}]} for m in self._drop_cot(messages)
+            if m["role"] not in {"system", "developer"}
+        ]
+        config = {
+            "max_output_tokens": self.max_tokens,
+            "thinking_config": {"thinking_level": self.kwargs.get("reasoning_effort"),
+                                "include_thoughts": True},
+            "automatic_continuation": True,
+            "continuation_token": self.kwargs.get("continuation_token"),
+            "system_instruction": "\n\n".join(
+                m["content"] for m in messages if m["role"] in {"system", "developer"}
+            ) or None,
+        }
+        payload = {"model": self.model, "contents": contents, "config": config}
+        responses = []
+        with genai.Client(api_key=self.api_key, http_options={"timeout": self.timeout * 1000}) as client:
+            while True:
+                ts = datetime.now().strftime("%m%d-%H:%M:%S.%f")
+                request_logger.log_request(ts=ts, batch_idx=idx, request={
+                    **payload, "config": genai.types.GenerateContentConfig(**config).model_dump(mode="json")
+                })
+                response = client.models.generate_content(**payload)
+                request_logger.log_response(ts=ts, batch_idx=idx, response=response.model_dump(mode="json"))
+                if not response.candidates:
+                    raise ValueError("Gemini returned no candidates")
+                responses.append(response)
+                candidate = response.candidates[0]
+                if candidate.finish_reason != "CONTINUATION":
+                    break
+                if not candidate.continuation_token:
+                    raise ValueError("Gemini continuation has no resume token")
+                # An empty upstream hop can make the SDK return an intermediate merge.
+                config["continuation_token"] = candidate.continuation_token
+        parts = [p for r in responses for p in ((r.candidates[0].content.parts or [])
+                 if r.candidates[0].content else [])]
+        conversation = [m.copy() for m in messages]
+        for thought, kind in ((True, "cot"), (False, "response")):
+            text = "".join(p.text for p in parts if p.text and bool(p.thought) == thought)
+            if text or not thought:
+                conversation.append({"role": "assistant", "type": kind, "content": text})
+        usages = [r.usage_metadata for r in responses]
+        return self.InternalRequestResult(
+            conversation, input_tokens=sum(u.prompt_token_count or 0 for u in usages),
+            output_tokens=sum((u.candidates_token_count or 0) + (u.thoughts_token_count or 0) for u in usages),
+            cached_input_tokens=sum(u.cached_content_token_count or 0 for u in usages),
+        )
 
     def _google_query_with_internal_tools(self, idx, messages):
         """Queries Google for BCN.

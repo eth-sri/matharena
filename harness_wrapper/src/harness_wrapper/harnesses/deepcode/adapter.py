@@ -69,7 +69,7 @@ class DeepCodeAgent(Agent):
                 "defaultMode": "allowAll",
                 "allow": [],
                 "ask": [],
-                "deny": ["network", "mcp"],
+                "deny": ["mcp"] if self.internet_enabled else ["network", "mcp"],
             },
         }
         if self.minimal_context:
@@ -141,7 +141,10 @@ class DeepCodeAgent(Agent):
                 for tool in tools
                 if isinstance(tool, dict)
                 and tool.get("type") == "function"
-                and tool.get("function", {}).get("name") in _LOCAL_TOOLS
+                and (
+                    tool.get("function", {}).get("name") in _LOCAL_TOOLS
+                    or self.internet_enabled and tool.get("function", {}).get("name") == "WebSearch"
+                )
             ]
         for message in payload.get("messages", []):
             if (
@@ -149,7 +152,7 @@ class DeepCodeAgent(Agent):
                 and message.get("role") == "system"
                 and "# Available Tools" in str(message.get("content", ""))
             ):
-                message["content"] = _MINIMAL_PROMPT
+                message["content"] = self.network_instructions(_MINIMAL_PROMPT)
 
     def _capture_model_response(self, path: str, payload: Mapping[str, Any]) -> None:
         self._touch()
@@ -287,6 +290,7 @@ class DeepCodeAgent(Agent):
                 listen_host=route.listen_host,
                 client_host=route.client_host,
                 allow_remote_clients=route.allow_remote_clients,
+                offline_models=self._offline_models,
                 unix_socket=route.unix_socket,
                 client_port=route.client_port,
             ) as proxy,

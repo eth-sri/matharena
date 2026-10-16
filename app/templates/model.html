@@ -1,29 +1,29 @@
-
 {% extends "base.html" %}
-
+{% from "components.html" import money, accuracy, outcomes %}
+{% block title %}{{ model }} · MathArena{% endblock %}
 {% block sidebar %}
-    {% if sidebar.euler_agent %}
-        <a href="{{ url_for('euler_agent') }}" class="sidebar-item">(((Euler Agent Checkpoints)))</a>
-    {% endif %}
-    <a href="{{ url_for('model_view', model=sidebar.current_model) }}" class="sidebar-item strong current">  {{ sidebar.current_model }}</a>
-    <div class="expanded">
-    {% for problem, data in sidebar.problems.items() %}
-        <a href="{{ url_for('problem_view', model=sidebar.current_model, problem_name=problem) }}" class="sidebar-item">{{ data.name }} {{ data.ticks }}</a>
-    {% endfor %}
-    </div>
-   
+    <a href="{{ url_for('model_view', model=sidebar.current_model) }}" class="sidebar-item current" aria-current="page">{{ sidebar.current_model }}</a>
+    {% for problem, data in sidebar.problems.items() %}<a href="{{ url_for('problem_view', model=sidebar.current_model, problem_name=problem) }}" class="sidebar-item problem-nav-item"><span>{{ data.name }}</span><span class="nav-ticks">{{ outcomes(data.ticks) }}</span></a>{% endfor %}
 {% endblock %}
-
 {% block content %}
-    <h3 style="text-align: left;">Model: {{ model }}</h3>
-    <div>
-        <p class="strong">Avg Acc: {{ stats.avg_accuracy }} ({{ stats.nb_problems }} problems)</p>
-        <p class="strong">Cost: ${{ stats.total_cost }}{% if stats.cost_estimated %} (estimated){% endif %}</p>
-        <div>
-            <a href="javascript:void(0)" class="sidebar-item copy-button" onclick="copyToClipboard()">📋</a>
-            {% for stat in stats.problem_stats %}
-                <p class="problem-stats">{{ stat }}</p>
-            {% endfor %}
+    <dl class="metrics-strip">
+        <div><dt>Average accuracy</dt><dd>{{ stats.avg_accuracy }}</dd></div>
+        <div><dt>Graded runs</dt><dd>{{ stats.n_graded }} <span class="metric-context">/ {{ stats.n_solutions }}</span></dd></div>
+        <div class="primary-cost"><dt>Cost per run <span class="unit">USD</span></dt><dd>{{ money(stats.cost_per_run, stats.cost_estimated) }}</dd></div>
+        <div class="secondary-cost"><dt>Total cost <span class="unit">USD</span></dt><dd>{{ money(stats.total_cost, stats.cost_estimated) }}</dd></div>
+    </dl>
+    <dl class="token-strip">{% for key, value in stats.tokens_per_run.items() %}<div><dt>{{ key | replace('_tokens', '') | replace('_', ' ') | capitalize }} tokens / run</dt><dd>{{ value | token_count }}</dd></div>{% endfor %}</dl>
+    <section class="table-panel" aria-label="Problem results">
+        <div class="table-toolbar"><button class="button" type="button" data-copy-table="problem-results">Copy table</button></div>
+        <div class="table-scroll" role="region" aria-label="Problem results" tabindex="0">
+            <table class="data-table" id="problem-results">
+                <thead><tr><th scope="col">Problem</th><th scope="col">Accuracy</th><th scope="col">Outcomes</th><th scope="col" class="numeric primary-cost">Cost / run</th><th scope="col" class="numeric">Total cost</th><th scope="col" class="numeric">Input / run</th><th scope="col" class="numeric">Cached input / run</th><th scope="col" class="numeric">Output / run</th></tr></thead>
+                <tbody>{% for stat in stats.problem_rows %}<tr>
+                    <th scope="row"><a class="model-link" href="{{ url_for('problem_view', model=model, problem_name=stat.id) }}">Problem {{ stat.id }}{% if stat.source %} · {{ stat.source }}{% endif %}<span class="row-arrow" aria-hidden="true">↗</span></a></th>
+                    <td>{{ accuracy(stat) }}</td><td class="outcome-ticks">{{ outcomes(stat.ticks) }}</td><td class="numeric cost-cell primary-cost">{{ money(stat.cost_per_run, stat.cost_estimated) }}</td><td class="numeric cost-cell secondary-cost">{{ money(stat.total_cost, stat.cost_estimated) }}</td>{% for key, value in stat.tokens_per_run.items() %}<td class="numeric token-cell">{{ value | token_count }}</td>{% endfor %}
+                </tr>{% endfor %}</tbody>
+            </table>
         </div>
-    </div>
+        {% if not stats.problem_rows %}<div class="empty-state"><h3>No runs yet</h3></div>{% endif %}
+    </section>
 {% endblock %}

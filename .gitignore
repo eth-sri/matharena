@@ -63,3 +63,12 @@ wandb/
 core
 core.*
 core_*
+
+# Source fixtures required by the harness image build.
+!/docker/harness-arxivlean/tex-smoke/check.sh
+!/docker/harness-arxivlean/tex-smoke/main.tex
+!/docker/harness-arxivlean/tex-smoke/proof.tex
+!/docker/harness-arxivlean/tex-smoke/references.bib
+
+# Disposable output-viewer summaries.
+/app/.cache/

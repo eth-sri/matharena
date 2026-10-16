@@ -1,0 +1,38 @@
+model: xiaomi/mimo-v2.6-flash
+api: openrouter
+# OpenCode supplies the agent loop; OPENROUTER_API_KEY pays for API usage.
+harness: opencode
+harness_version: "1.18.27"
+max_tokens: 131072
+concurrent_requests: 16
+stream_openai_chat_completions: false
+extra_body:
+  reasoning:
+    enabled: true
+  provider:
+    only: [io-net/fp8]
+    allow_fallbacks: false
+# OpenRouter USD per million tokens, verified 2026-09-22:
+# https://openrouter.ai/xiaomi/mimo-v2.6-pro
+read_cost: 0.14
+cache_read_cost: 0.0028
+write_cost: 0.28
+human_readable_id: MiMo-V2.6-Flash
+date: "2026-09-21"
+other_params:
+  open: true
+  creator: Xiaomi
+  parameters: 309
+  active_parameters: 15
+  huggingface_id: XiaomiMiMo/MiMo-V2.6-Flash-RL
+
+harness_config:
+  auth: api
+  container_executable: opencode
+  # Actual context: 1,048,576. Reserve 48,576 tokens of additional headroom.
+  # OpenCode also reserves max_tokens + 20,000, compacting at 848,928 tokens.
+  model_context_window: 1000000
+  cpu_limit: 4
+  memory_gb: 12
+  pids_limit: 768
+  tmpfs_size: 1g

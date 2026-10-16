@@ -1,30 +1,40 @@
-
 {% extends "base.html" %}
-
+{% from "components.html" import money, accuracy %}
+{% block title %}Leaderboard · MathArena{% endblock %}
 {% block sidebar %}
-    {% for model, model_stats in stats.items() %}
-        <a href="{{ url_for('model_view', model=model) }}" class="sidebar-item">{{ model }} ({{ model_stats.n_correct }} / {{ model_stats.n_solutions }})
-            <div class="progress-bar-container">
-                <div class="progress-bar-fill" style="width: {{ model_stats.avg_accuracy }};">
-                </div>
-            </div>
-
-        </a>
-    {% endfor %}
+    {% for model, stat in stats.items() %}
+        <a href="{{ url_for('model_view', model=model) }}" class="sidebar-item model-nav-item"><span class="nav-model-name">{{ model }}</span><span class="nav-score">{{ stat.avg_accuracy }}</span></a>
+    {% else %}<p class="sidebar-empty">No models yet.</p>{% endfor %}
 {% endblock %}
-
 {% block content %}
-    {% for model, model_stats in stats.items() %}
-        <h3>Model: {{ model }}</h3>
-        <div>
-            <p class="strong">Avg Acc: {{ model_stats.avg_accuracy }} ({{ model_stats.nb_problems }} problems)</p>
-            <p class="strong">Cost: ${{ model_stats.total_cost }}{% if model_stats.cost_estimated %} (estimated){% endif %}</p>
-            <div>
-                <a href="javascript:void(0)" class="sidebar-item copy-button" onclick="copyToClipboard()">📋</a>
-                {% for stat in model_stats.problem_stats %}
-                    <p class="problem-stats">{{ stat }}</p>
-                {% endfor %}
-            </div>
+    <section class="table-panel" aria-label="Leaderboard">
+        <div class="table-scroll" role="region" aria-label="Model leaderboard" tabindex="0">
+            <table class="data-table leaderboard" id="leaderboard">
+                <caption class="sr-only">Models ranked by accuracy, with coverage and cost in US dollars. Column headings can sort the table.</caption>
+                <thead><tr>
+                    <th scope="col" class="rank-col">#</th>
+                    <th scope="col" aria-sort="none"><button data-sort-key="model" data-sort-type="text">Model <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                    <th scope="col" aria-sort="descending"><button data-sort-key="accuracy" data-default-direction="desc" title="Mean of per-problem accuracies; pending grades excluded">Accuracy <span class="sort-indicator" aria-hidden="true">↓</span></button></th>
+                    <th scope="col" class="numeric" aria-sort="none"><button data-sort-key="problems" data-default-direction="desc">Problems <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                    <th scope="col" class="numeric primary-cost" aria-sort="none"><button data-sort-key="unitCost">Cost / run <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                    <th scope="col" class="numeric" aria-sort="none"><button data-sort-key="cost">Total cost <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                    {% for key, label in [('input_tokens', 'Input / run'), ('cached_input_tokens', 'Cached input / run'), ('output_tokens', 'Output / run')] %}<th scope="col" class="numeric" aria-sort="none"><button data-sort-key="{{ key }}" title="Average {{ key | replace('_', ' ') }} per run{% if key == 'input_tokens' %}, including cached input{% endif %}">{{ label }} <span class="sort-indicator" aria-hidden="true">↕</span></button></th>{% endfor %}
+                </tr></thead>
+                <tbody>
+                    {% for model, stat in stats.items() %}
+                    <tr data-model="{{ model }}" data-accuracy="{{ stat.accuracy_value if stat.accuracy_value is not none else '' }}" data-problems="{{ stat.nb_problems }}" data-cost="{{ stat.cost_value }}" data-unit-cost="{{ stat.cost_per_run_value if stat.cost_per_run_value is not none else '' }}" {% for key, value in stat.tokens_per_run.items() %}data-{{ key }}="{{ value if value is not none else '' }}" {% endfor %}>
+                        <td class="rank-col"><span class="rank {% if stat.rank == 1 %}rank-first{% endif %}">{{ stat.rank if stat.rank is not none else '—' }}</span></td>
+                        <th scope="row"><a class="model-link" href="{{ url_for('model_view', model=model) }}">{{ model }}<span class="row-arrow" aria-hidden="true">↗</span></a></th>
+                        <td>{{ accuracy(stat) }}</td>
+                        <td class="numeric">{{ stat.nb_problems }}</td>
+                        <td class="numeric cost-cell primary-cost">{{ money(stat.cost_per_run, stat.cost_estimated) }}</td>
+                        <td class="numeric cost-cell secondary-cost">{{ money(stat.total_cost, stat.cost_estimated) }}</td>
+                        {% for key, value in stat.tokens_per_run.items() %}<td class="numeric token-cell">{{ value | token_count }}</td>{% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
-    {% endfor %}
+        {% if not stats %}<div class="empty-state"><h3>No results yet</h3></div>{% endif %}
+    </section>
 {% endblock %}

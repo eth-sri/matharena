@@ -120,10 +120,10 @@ def extract_existing_configs(
     for config_path in all_configs:
         if os.path.exists(os.path.join(root_dir, comp, config_path)):
             exists = True
-            if not is_final_answer:
+            if not is_final_answer and not allow_non_existing_judgment:
                 for file in os.listdir(os.path.join(root_dir, comp, config_path)):
                     data = load_json_zst(os.path.join(root_dir, comp, config_path, file))
-                    if "judgment" not in data and not allow_non_existing_judgment:
+                    if "judgment" not in data:
                         logger.warning(f"Judgment not found in {file}")
                         exists = False
                         break

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from typing import Any
+from urllib.parse import urlsplit
 
 from ...agent import Agent, AgentEvent
 from ...models.request_capture import RequestCaptureProxy
 from ...tools import CLIInstallation, CLIProcessError
+from ...traces import TokenUsage
 
 _MINIMAL_INSTRUCTIONS = """Use the available local file and shell tools to solve the user's task.
 Do not use internet or remote-search tools.
@@ -23,6 +25,44 @@ class QwenCodeAgent(Agent):
         package="@qwen-code/qwen-code",
     )
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._cumulative_usage = TokenUsage()
+        self._cumulative_usage_session_id: str | None = None
+
+    def _begin_token_session(self, *, resume: bool, session_id: str | None) -> None:
+        previous_session_id = self._token_session_id
+        super()._begin_token_session(resume=resume, session_id=session_id)
+        if not resume or (session_id is not None and session_id != previous_session_id):
+            with self._tokens_lock:
+                self._cumulative_usage = TokenUsage()
+                self._cumulative_usage_session_id = session_id
+
+    def _incremental_usage(self, value: Any, session_id: str | None) -> Any:
+        """Qwen results report session totals, even after failed turns and resumes."""
+        usage = self._normalize_token_usage(value)
+        if usage is None:
+            return value
+        fields = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
+        with self._tokens_lock:
+            current_session_id = session_id or self._token_session_id
+            if (
+                current_session_id is not None
+                and self._cumulative_usage_session_id is not None
+                and current_session_id != self._cumulative_usage_session_id
+            ):
+                self._cumulative_usage = TokenUsage()
+            self._cumulative_usage_session_id = current_session_id
+            previous = self._cumulative_usage
+            # Duplicate, partial, or older snapshots must not lower the baseline.
+            self._cumulative_usage = TokenUsage(**{
+                key: max(getattr(previous, key), getattr(usage, key)) for key in fields
+            })
+            return {
+                key: getattr(self._cumulative_usage, key) - getattr(previous, key)
+                for key in fields
+            }
+
     def model_environment(self) -> dict[str, str]:
         environment = super().model_environment()
         environment["QWEN_STREAM_IDLE_TIMEOUT_MS"] = "28800000"
@@ -37,6 +77,7 @@ class QwenCodeAgent(Agent):
             }[protocol]
             environment[base_name] = str(capture_url)
         environment["QWEN_CODE_SUPPRESS_YOLO_WARNING"] = "1"
+        environment["QWEN_CODE_EMIT_TOOL_USE_SUMMARIES"] = "0"
         environment["QWEN_CODE_SAFE_MODE"] = "true" if self.minimal_context else "false"
         return environment
 
@@ -86,9 +127,11 @@ class QwenCodeAgent(Agent):
                 on_response=self._capture_model_response,
                 request_overrides=(override_provider() if callable(override_provider) else {}),
                 request_drop_fields=(drop_provider() if callable(drop_provider) else ()),
+                request_transform=self._filter_request,
                 listen_host=route.listen_host,
                 client_host=route.client_host,
                 allow_remote_clients=route.allow_remote_clients,
+                offline_models=self._offline_models,
                 unix_socket=route.unix_socket,
                 client_port=route.client_port,
             ) as proxy,
@@ -100,6 +143,22 @@ class QwenCodeAgent(Agent):
                 )
             finally:
                 del self._request_capture_url
+
+    def _filter_request(self, path: str, payload: dict[str, Any]) -> None:
+        if (
+            not self.internet_enabled
+            or self._model_protocol() != "openai"
+            or not path.rstrip("/").endswith("/chat/completions")
+            or urlsplit(self.model.endpoint_for("openai").url).hostname
+            not in {"openrouter.ai", "us.openrouter.ai"}
+        ):
+            return
+        tools = payload.get("tools")
+        # Keep auxiliary/tool-free requests intact; OpenRouter executes searches.
+        if isinstance(tools, list) and tools and not any(
+            tool.get("type") == "openrouter:web_search" for tool in tools
+        ):
+            tools.append({"type": "openrouter:web_search"})
 
     def build_command(
         self,
@@ -123,14 +182,16 @@ class QwenCodeAgent(Agent):
             "yolo",
         ]
         if self.minimal_context:
+            # Bare mode removes web_fetch even when it is not excluded.
+            if not self.internet_enabled:
+                command.append("--bare")
             command.extend(
                 (
                     "--safe-mode",
-                    "--bare",
                     "--exclude-tools",
-                    "agent,web_fetch,web_search",
+                    "agent" if self.internet_enabled else "agent,web_fetch,web_search",
                     "--system-prompt",
-                    _MINIMAL_INSTRUCTIONS,
+                    self.network_instructions(_MINIMAL_INSTRUCTIONS),
                 )
             )
         if resume:
@@ -220,7 +281,9 @@ class QwenCodeAgent(Agent):
             else:
                 result = [make("result", content)]
             if event.get("usage") is not None:
-                result.append(make("usage", event["usage"]))
+                result.append(make(
+                    "usage", self._incremental_usage(event["usage"], normalized_session_id)
+                ))
             return result
         return super().normalize_event(event)
 

@@ -1,6 +1,15 @@
-model: claude-opus-5
-api: anthropic
-max_tokens: 300000
+model: anthropic/claude-opus-5
+api: openrouter
+# Claude Code runs locally; OPENROUTER_API_KEY pays for Anthropic-only routing.
+harness: claude
+harness_version: "2.1.267"
+harness_config:
+  auth: api
+  container_executable: claude
+  environment:
+    CLAUDE_CODE_MAX_OUTPUT_TOKENS: "128000"
+# OpenRouter's synchronous endpoint supports 128k output, not the 300k batch beta.
+max_tokens: 128000
 concurrent_requests: 32
 temperature: null
 top_p: null
@@ -8,15 +17,14 @@ cache_write_cost: 6.25
 cache_read_cost: 0.5
 read_cost: 5
 write_cost: 25
-thinking:
-  type: adaptive
-output_config:
-  effort: max
-cache_control:
-  type: ephemeral
-batch_processing: true
-anthropic_betas:
-  - output-300k-2026-03-24
+reasoning_effort: max
+extra_body:
+  provider:
+    only: [anthropic]
+    ignore: [anthropic/fast]
+    allow_fallbacks: false
+  cache_control:
+    type: ephemeral
 human_readable_id: Claude-Opus-5 (max)
 date: "2026-07-24"
 other_params:

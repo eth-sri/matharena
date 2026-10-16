@@ -4,12 +4,14 @@ from matharena.solvers.agent_pool import AgentPool
 from matharena.solvers.judges.simple_judge import SimpleJudge
 from matharena.solvers.judges.maj_judge import MajorityJudge
 from matharena.solvers.judges.norm_judge import NormalizeJudge
+from matharena.container_runtime import validate_container_runtime
 
 
 class JudgePool(AgentPool):
     AGENT_CLASSES = {"simple_judge": SimpleJudge, "maj_judge": MajorityJudge, "norm_judge": NormalizeJudge}
 
-    def __init__(self, solver_config):
+    def __init__(self, solver_config, *, container_runtime="docker"):
+        self.container_runtime = validate_container_runtime(container_runtime)
         self.solver_config = solver_config
         self.scaffold_config = solver_config
         self.n_threads = self.scaffold_config.get("n_threads", 1)
@@ -28,6 +30,7 @@ class JudgePool(AgentPool):
                 problem_idx=problem_idx,
                 run_idx=run_idx,
                 solver_config=self.solver_config,
+                container_runtime=self.container_runtime,
             )
             response = agent.solve(
                 stmt[0], payload["guidelines"], payload["ground_truth_solutions"],

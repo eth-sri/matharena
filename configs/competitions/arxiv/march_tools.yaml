@@ -69,7 +69,7 @@ instruction: |
   - Prefer read_page and find_in_paper to explore a paper first; reading the entire paper can pollute your context window with irrelevant information. Only read the full paper if it is really relevant.
   
 strict_parsing: false
-n_problems: 31
+n_problems: 30
 date: "2026-03-01"
 max_tool_calls:
   read_paper: 5

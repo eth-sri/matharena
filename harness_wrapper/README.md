@@ -1,7 +1,7 @@
 # harness-wrapper
 
-`harness-wrapper` presents Claude Code, Codex CLI, Kimi Code, Antigravity CLI,
-Qwen Code, OpenCode, and Deep Code through one Python interface. It keeps normalized JSONL
+`harness-wrapper` presents Claude Code, Codex CLI, Kimi Code, Grok Build, Antigravity CLI,
+Qwen Code, OpenCode, Deep Code, and Mistral Vibe through one Python interface. It keeps normalized JSONL
 traces and session metadata inside the repository where an agent runs, supports
 resumable/interruption-aware subprocesses, explicit API or OAuth model
 configuration, and an optional Podman sandbox.
@@ -72,7 +72,7 @@ interactive login path when credentials need user action.
 | API fallback before waiting | Enabled | `Agent(auto_fallback=False)` |
 | Rate-limit wait timeout | No deadline | `Agent(rate_limit_timeout=SECONDS)` |
 | Poll interval while waiting | 30 seconds | `Agent(rate_limit_poll_interval=SECONDS)` |
-| Runtime recovery attempts | 3 | `Agent(max_recovery_attempts=N)`; `0` disables retries |
+| Runtime recovery attempts | 10 | `Agent(max_recovery_attempts=N)`; `0` disables retries |
 | Subagents for OAuth | Auto-discovered | `subagents={...}` or `{}` to disable |
 | Minimal CLI context | Disabled | `Agent(minimal_context=True)` |
 | Version validation | Disabled | `validate_version=True` |
@@ -95,7 +95,9 @@ and disables project instructions, plugins, MCP, LSP, formatters, subagents,
 skills, and web tools. Deep Code uses native `--exec` with a private home, disabled
 bundled/discovered skills and telemetry, denied network/MCP permissions, and a
 proxy-enforced local-tool allowlist. Its saved JSONL supplies tool events and
-resumable session IDs. Native authentication and resumable sessions continue to
+resumable session IDs. Mistral Vibe uses a private `VIBE_HOME` with telemetry, connectors,
+project context, and titles off; the proxy replaces its system prompt and allows only
+`bash`, `read_file`, `write_file`, `edit`, and `todo`. Native authentication and resumable sessions continue to
 work. Antigravity's closed client still adds built-in messaging/artifact and
 current-time context; its separate title request is included in captured token
 usage.
@@ -291,10 +293,15 @@ configured API fallback; if none is available, polling continues until capacity
 returns and the session resumes. Recovery events are emitted as `AgentEvent`
 objects with type `"recovery"`.
 
-All harness invocation failures use `max_recovery_attempts` (default: three additional
-attempts). This includes nonzero exits, explicit CLI error events even with exit code 0,
+All harness invocation failures use `max_recovery_attempts` (default: ten additional
+attempts without an intervening successful model request). This includes nonzero exits,
+explicit CLI error events even with exit code 0,
 startup/authentication exceptions, and unknown errors; no error-message allowlist is
-required. Every wrapper retry waits 60 seconds, including authentication/quota recovery,
+required. A completed model request observed by the API proxy resets the allowance,
+even if the same CLI invocation later fails. Partial streams, usage snapshots, replayed
+native transcript events, and token-limited completions do not reset it. The recovery
+event's `attempt` counts retries since the last observed successful request.
+Every wrapper retry waits 60 seconds, including authentication/quota recovery,
 model fallback, incomplete responses, and output-limit continuations. A known session is resumed; otherwise the wrapper
 resumes the latest session if progress was emitted, or repeats the original prompt if
 nothing started. A failed resume is retried without starting a fresh task. Optional
@@ -308,7 +315,7 @@ Set `max_recovery_attempts=0` to disable wrapper retries. Native CLI/request ret
 can happen inside each invocation and have their own limits.
 
 Claude Code output-limit failures also resume the saved native session within
-`max_recovery_attempts` (default 3). A terminal `stop_reason: "max_tokens"`
+`max_recovery_attempts` (default 10). A terminal `stop_reason: "max_tokens"`
 also triggers continuation when the CLI reports `is_error: false` and exits 0.
 The wrapper captures terminal usage before resuming. Ordinary `end_turn` results,
 including empty answers, do not trigger output-limit recovery.
@@ -317,7 +324,7 @@ emits an empty result with `reason: max_output_tokens`, preserving usage and par
 work. MathArena saves it as a finished attempt, as it does for Muse's exhausted
 continuation. Connection and other provider failures still follow the error path.
 Each resumed CLI invocation has its own internal retry budget: Claude Code 2.1.267 allows an initial request plus three
-output-limit continuations, so three wrapper resumptions allow up to 16 attempts
+output-limit continuations, so ten wrapper resumptions allow up to 44 attempts
 for repeated truncation. Failed attempts retain their token usage, and recoveries
 emit `output_limit_resume`. This cannot restore thinking omitted by the CLI.
 
@@ -345,7 +352,7 @@ agent = Agent(
     auto_wait=True,  # wait when no fallback remains
     rate_limit_timeout=None,  # no deadline
     rate_limit_poll_interval=30,
-    max_recovery_attempts=3,
+    max_recovery_attempts=10,
 )
 ```
 
@@ -426,12 +433,12 @@ print(model.endpoint_for("openai").url)  # configured location
 For one endpoint, use `api_url`, `api_key`, and optional `api_type` (default:
 `"openai"`). `headers={...}` adds explicit custom headers. API and OAuth
 arguments are mutually exclusive. Claude Code accepts Anthropic-compatible
-models, Codex, OpenCode, and Deep Code accept OpenAI-compatible models, Kimi and Qwen accept
+models, Codex, OpenCode, Deep Code, and Mistral Vibe accept OpenAI-compatible models, Kimi and Qwen accept
 either, and Antigravity CLI uses the native Gemini API. Model construction reports a
 descriptive compatibility error before starting a CLI. Claude-plan OAuth is
 restricted to Claude Code, Kimi-plan OAuth to Kimi Code, and OpenAI-plan OAuth
 to Codex or local Kimi through the bridge described above. The isolated
-MathArena adapters currently restrict Antigravity CLI, Qwen Code, OpenCode, and Deep Code to
+MathArena adapters currently restrict Antigravity CLI, Qwen Code, OpenCode, Deep Code, and Mistral Vibe to
 explicit API-credit auth; this avoids silently importing account state from a
 developer machine.
 
@@ -623,10 +630,28 @@ disabled with `network_enabled=False`. Change the image, container root, Podman
 binary, or low-level arguments with `image`, `container_root`,
 `podman_executable`, and `extra_args`.
 
+`container_executable` can be an absolute container path or a command found on
+the container's `PATH`. It replaces absolute host executable paths; relative
+helper commands such as `./check.sh` remain unchanged.
+
 During an agent invocation, `network_enabled=False` still permits the protected
 model proxy through a temporary internal Podman network. The container has no
 direct external route; the host-side proxy performs the upstream request and the
 temporary network is removed when the invocation finishes.
+
+For offline sandboxes, all built-in harness adapters also enforce an offline
+policy at their host-side model proxy, including the Codex OAuth WebSocket and
+Kimi custom-header bridges. Requests are limited to the configured model (plus
+the pinned Antigravity CLI's existing Flash Lite housekeeping model) and to
+inference, compaction, token-counting and model-catalog endpoints. The proxy
+rejects provider-hosted tools, web plugins and remote URL inputs; local function
+tools, inline data and compaction remain available. Policy violations return
+`403 offline_policy_violation` without reaching the provider. Malformed request
+bodies fail closed, and the HTTP proxies do not follow upstream redirects.
+This follows `network_enabled=False` (MathArena's `direct_network: false`); no
+additional competition setting is needed. The CLI's local proxy secret alone
+does not enforce this boundary, because shell tools can inspect the CLI's own
+configuration. Already-running processes must be restarted to load this policy.
 
 Both local and Podman environments expose `run(...)`, `copy_in(...)`,
 `copy_out(...)`, and `delete(...)`. Filesystem helpers constrain managed paths
@@ -733,7 +758,7 @@ from Muse. To make this possible, SSE bodies are spooled before delivery (over
 finishes. Other harness transports retain immediate streaming.
 
 A turn truncated by `max_output_tokens` resumes its native session within the shared
-`max_recovery_attempts` budget (default: three additional attempts), using an empty text input so Muse inserts its own
+`max_recovery_attempts` budget (default: ten additional attempts), using an empty text input so Muse inserts its own
 previous-turn placeholder without an extra model-visible user message. Solver
 requests use the configured output ceiling (1,000,000 in MathArena's Muse Spark 1.3 config),
 subject to the context-budget adjustment above. Once the shared retry budget is
@@ -759,3 +784,69 @@ history reconstruction errors still fail explicitly; the adapter does not discar
 history or silently restart when Muse cannot replay it.
 See [MathArena setup](../readmes/README_harness.md#meta-muse-code) for model config,
 Docker isolation, and the account's supported reasoning effort.
+
+
+## Grok Build
+
+`Agent(type="grok", ...)` runs the native Grok Build headless CLI (aliases:
+`grok-build`, `grok-cli`). Install a pinned release with
+`harness-wrapper install-clis grok-build --version grok-build=1.0.40`.
+The installer uses the official versioned HTTPS binary and verifies `--version`;
+xAI's installer does not publish a checksum manifest.
+
+The adapter uses a private `GROK_HOME`, a custom Responses model, file-based
+prompts, streaming JSON events, and native session resume. Set
+`model_context_window` to control native compaction (default 500,000). API
+credentials remain in proxy headers; the CLI receives a placeholder. Only API
+credit authentication is supported. Model request overrides and request capture
+use the same proxy as the other adapters. The Responses route is stateless:
+Grok replays full history on tool continuations and resume, and the proxy enforces
+`store: false` and rejects non-null `previous_response_id`.
+
+A fixed output reservation can exceed the remaining context as tool history grows.
+On an explicit context-overflow HTTP 400 with OpenRouter's text/tool input counts,
+the adapter retries the same request once with `max_output_tokens` reduced to the
+reported context size minus input minus 8,192 tokens of headroom. It retains the
+lower ceiling for subsequent calls and adjusts again if required. The corrected
+request and adjustment are logged; input, encrypted reasoning, and tools are
+preserved. Streaming stays immediate, and other errors still reach the native CLI.
+If the input itself leaves no room, the original error is forwarded unchanged.
+
+Minimal mode removes optional context and filters tools to local terminal, file,
+search, and todo operations. The title-only `session_title` schema remains intact.
+The native sandbox is disabled because MathArena supplies the outer Docker
+boundary. Using this adapter without a sandbox runs tools on the local machine,
+like the other CLI adapters.
+
+Usage comes from every provider response, including auxiliary calls and failed
+requests with reported usage. Reasoning is already included in completion tokens;
+native usage events are not added again. Explicit `end_turn` with no text is an
+empty result, while missing or unsuccessful terminal events remain failures.
+Grok Build retains its native inference retries, including retries for reasoning-only
+provider responses; MathArena's wrapper retry budget applies to CLI invocation failures.
+
+See [MathArena configuration](../readmes/README_harness.md#grok-47-through-openrouter-and-grok-build)
+and the [official Grok Build reference](https://docs.x.ai/build/cli/reference).
+
+## Mistral Vibe
+
+`Agent(type="vibe", ...)` runs Mistral Vibe's programmatic mode (aliases: `mistral-vibe`,
+`vibe-cli`, `mistral`). Install a pinned release with
+`harness-wrapper install-clis mistral-vibe --version mistral-vibe=2.26.1`. The installer
+downloads the standalone PyInstaller bundle from the GitHub release, verifies its SHA-256
+digest, and installs `bin/vibe` with its adjacent `bin/_internal` runtime.
+
+The adapter writes a private `$VIBE_HOME/config.toml` with one generic OpenAI-compatible
+provider pointing at the request proxy, sends the prompt on stdin to `vibe -p`, parses
+`--output streaming` history entries, and resumes with `--resume <id>` under
+`VIBE_CLI=python`. Vibe prints no terminal event: a zero exit yields a result containing the
+turn's last assistant text. Usage comes from proxied provider responses. Set
+`model_context_window` to derive Vibe's compaction threshold from the proxy's `max_tokens`.
+The proxy drops Vibe's built-in temperature unless the model's request overrides set one,
+and withholds mid-stream `finish_reason: "error"` events so Vibe retries instead of
+accepting a truncated completion. See
+[MathArena configuration](../readmes/README_harness.md#mistral-large-4-through-mistral-vibe).
+
+
+Minimal-context agents can use shell networking and native web tools when
+`env.network_enabled=True`. MathArena Docker runs default to offline.

@@ -259,6 +259,17 @@ def test_podman_maps_absolute_executables(tmp_path: Path) -> None:
     assert argv[-2:] == ["/opt/agent/bin/agent", "run"]
 
 
+@pytest.mark.parametrize("executable", ["agent", "/opt/agent/bin/agent"])
+def test_podman_preserves_helper_commands_with_configured_executable(
+    tmp_path: Path, executable: str
+) -> None:
+    sandbox = PodmanSandbox(tmp_path, container_executable=executable)
+    argv, _, _ = sandbox.prepare_command(["/host/bin/agent", "run"], cwd=tmp_path)
+    assert argv[-2:] == [executable, "run"]
+    argv, _, _ = sandbox.prepare_command(["./check.sh"], cwd=tmp_path)
+    assert argv[-1] == "./check.sh"
+
+
 def test_podman_translates_executable_in_mounted_root(tmp_path: Path) -> None:
     root = tmp_path / "root"
     executable = root / "bin" / "agent"

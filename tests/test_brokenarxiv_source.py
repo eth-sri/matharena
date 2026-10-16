@@ -664,7 +664,7 @@ def test_screening_paces_batches_and_resumes_without_repeating_completed_work(mo
                 yield index, [{"role": "assistant", "content": json.dumps({"decision": decision})}], {"cost": 0}
 
     monkeypatch.setattr(screen_abstracts.time, "sleep", sleep)
-    monkeypatch.setattr(screen_abstracts, "create_query_client", lambda _: Client())
+    monkeypatch.setattr(screen_abstracts, "create_query_client", lambda _, **kwargs: Client())
     monkeypatch.setattr(sys, "argv", [
         "screen_abstracts.py", "--paper-root", str(root), "--batch-size", str(batch_size),
     ] + (["--false"] if false_mode else []))

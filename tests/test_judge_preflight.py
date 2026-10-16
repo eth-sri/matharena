@@ -18,8 +18,9 @@ from matharena.json_zst import dump_json_zst
         [{"role": "assistant", "type": "response"}],
     ],
 )
+@pytest.mark.parametrize("runtime", ["docker", "podman"])
 def test_judge_rejects_incomplete_transcript_before_requests(
-    tmp_path, monkeypatch, conversation
+    tmp_path, monkeypatch, conversation, runtime
 ):
     root = Path(__file__).resolve().parents[1]
     spec = importlib.util.spec_from_file_location(
@@ -42,15 +43,12 @@ def test_judge_rejects_incomplete_transcript_before_requests(
 
     class NoRequests:
         def __init__(self, **kwargs):
-            pass
+            assert kwargs["container_runtime"] == runtime
 
         def solve_batch(self, *args):
             pytest.fail("Incomplete attempts must be rejected before any grading calls")
 
     monkeypatch.setattr(judge, "JudgePool", NoRequests)
-    monkeypatch.setattr(judge, "load_grading_map", lambda *args, **kwargs: {
-        4: {"id": 4, "points": 1, "scheme": "Test rubric", "ground_truth_solutions": ["Test answer"]},
-    })
     monkeypatch.chdir(root)
     monkeypatch.setattr(
         "sys.argv",
@@ -62,6 +60,8 @@ def test_judge_rejects_incomplete_transcript_before_requests(
             str(tmp_path),
             "--models",
             "gemini/gemini-38-flash",
+            "--container-runtime",
+            runtime,
         ],
     )
     with pytest.raises(ValueError, match="run 1: no final assistant response"):
