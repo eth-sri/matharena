@@ -932,7 +932,7 @@ class ParsePrimitive(ParseObject):
                     return Fraction(int(float_string), 1)
                 return int(float_string), warning
             return float_string, warning
-        except ValueError:
+        except (ValueError, OverflowError):
             # logger.info(f"Couldn't configure floating point to fraction for {string}")
             pass
         # Expression

@@ -137,3 +137,12 @@ def test_boxed_zero_is_correct_for_zero_gold():
     assert str(answer) == "0"
     assert is_correct
     assert warning == 0
+
+
+@pytest.mark.parametrize(
+    ("boxed_answer", "expected_correct"),
+    [("inf", False), ("-inf", False), ("1e999", False), ("-1e999", False), ("5", True)],
+)
+def test_boxed_float_overflow_does_not_crash_grading(boxed_answer, expected_correct):
+    answer, _ = extract_answer(r"\boxed{" + boxed_answer + "}")
+    assert check_answers(answer, parse_answer("5")[0]) is expected_correct
