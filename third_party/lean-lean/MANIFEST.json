@@ -1,0 +1,12 @@
+{
+  "source": "lean-lean working tree",
+  "head": "a940972ba7b7ef8a138680fc0bfbb62926fbb891",
+  "copied_at": "2026-11-03",
+  "note": "The vendored token counter includes the fix for code following an import on the same line.",
+  "files": {
+    "src/leanlean/metrics/tokens.py": {
+      "sha256": "58241348b9b84eb4d4a96ff078a8a943731d672a9130363227f0386205649b4d",
+      "matches_head": false
+    }
+  }
+}

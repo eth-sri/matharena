@@ -1,0 +1,58 @@
+# Populate eval-runtime.json with scripts/leanlean_prepare_eval.sh first.
+dataset_format: leanlean
+dataset_path: data/leanlean/oct26
+final_answer: false
+lean: false
+allow_harness: true
+default_harness: codex
+n_problems: 32
+instruction: |-
+  Compress the proofs in this codebase.
+  Remove all dead code and do real simplification, i.e. use powerful tactics or factor out shared logic to simplify the code while preserving the main results.
+  Success is measured by three factors:
+
+  (1) The repo compiling without errors and relying only on standard axioms.
+  (2) The benchmark's protected main results compile and remain equivalent. Run `lake comparator` from the project directory to verify the signatures.
+  (3) The scoring metric you should maximize is the reduction in non-whitespace, non-comment "Lean tokens" across all .lean files, compared to the starting state. Compressing imports does not count towards the compression metric. Run python3 /work/proof_length.py to measure it.
+
+  You are working in a container that is limited to 8 CPUs and 64 GiB of RAM.
+
+  Continue until there is no more compression to be done. You have a wall-clock budget of {run_time_limit_hours} hours. It started at {run_started_at} and expires at {run_deadline_at}.
+
+  {problem}
+harness_config:
+  # Use the shared ArxivLean profile: local file, search, and shell tools.
+  tools_enabled: true
+  minimal_context: true
+  subagents: {}
+  # Per project attempt, starting after preflight; cost exhaustion allows salvage.
+  max_cost_usd: 100
+  max_time_seconds: 43200
+  cost_limit_grace_seconds: 900
+  cost_limit_grace_prompt: |-
+    You have hit the cost budget. You have up to {cost_limit_grace_minutes} minutes to salvage your current LeanLean solution.
+    Stop attempting new refactors. Use your saved work to leave the repository compiling and preserve the protected results. Repair or revert incomplete edits, then run `lake build` and `lake comparator` from the project directory and measure the final size with `python3 /work/proof_length.py`.
+    Save your changes and finish by {cost_limit_deadline_at} (UTC). You can check the current time with `date -u`. The original overall time limit still applies.
+  monitoring:
+    diff: true
+    cpu: true
+    ram: true
+    commands: true
+  compress_model_requests: true
+  preflight: python proof_length.py && ./check.sh
+  repo_eval: true
+  helper_files: data/leanlean/helpers
+  runtime_manifest: data/leanlean/oct26/eval-runtime.json
+  keep_workspaces: true
+  preflight_timeout_s: 21600
+  run_check_after_harness: false
+  direct_network: false
+  read_only_rootfs: true
+  memory_gb: 64
+  # Comparator temporarily retains both exports; these can exceed 1 GiB.
+  tmpfs_size: 16g
+  # Match lean-strip: large files can keep one elaboration thread per command.
+  pids_limit: -1
+  cpu_limit: 8
+  environment:
+    LEAN_NUM_THREADS: '8'

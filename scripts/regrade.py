@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+from pathlib import Path
 
 import yaml
 from loguru import logger
@@ -26,6 +27,10 @@ from matharena.utils import is_conversation_broken, normalize_conversation
 parser = argparse.ArgumentParser()
 parser.add_argument("--comps", type=str, nargs="+", required=True)
 parser.add_argument("--n", type=int, default=4)
+parser.add_argument("--problems", type=int, nargs="+", help="Only process these problem IDs")
+parser.add_argument("--grading-dir", type=Path, help="Alternate root for LeanLean grading reports")
+parser.add_argument("--workers", type=int, default=1, help="Parallel LeanLean verification jobs")
+parser.add_argument("--resume", action="store_true", help="Resume an existing LeanLean grading report")
 parser.add_argument("--no-update-idx", action="store_true", help="Do not fix off-by-one idx")
 parser.add_argument("--no-clean-messages", action="store_true", help="Do not clean messages")
 parser.add_argument("--no-rerun-grader", action="store_true", help="Do not rerun the grader")
@@ -37,16 +42,33 @@ parser.add_argument("--comp-configs-dir", type=str, default="configs/competition
 parser.add_argument("--model-configs-dir", type=str, default="configs/models")
 parser.add_argument("--output-dir", type=str, default="outputs")
 args = parser.parse_args()
+if args.workers < 1:
+    parser.error("--workers must be positive")
 
 missing_runs = []
+leanlean_exit_code = 0
 
 for comp in args.comps:
 
     logger.info(f"Initializing runner for competition {comp}")
-    runner = Runner(comp, args.n, None, args.comp_configs_dir, None, args.output_dir, False)
+    runner = Runner(comp, args.n, args.problems, args.comp_configs_dir, None, args.output_dir, False)
     for api in os.listdir(f"{args.output_dir}/{comp}"):
         for solver in os.listdir(f"{args.output_dir}/{comp}/{api}"):
             if args.models is not None and f"{api}/{solver}" not in args.models:
+                continue
+
+            if runner.competition_config.get("dataset_format") == "leanlean":
+                if not args.no_rerun_grader:
+                    from leanlean.postprocess import grade_saved_runs
+
+                    results = Path(args.output_dir) / comp / api / solver
+                    grading = (args.grading_dir / comp / api / solver if args.grading_dir is not None
+                               else results / "leanlean-grading")
+                    status = grade_saved_runs(
+                        results, Path(runner.competition_config["dataset_path"]), grading,
+                        problems=args.problems, workers=args.workers, resume=args.resume,
+                    )
+                    leanlean_exit_code = max(leanlean_exit_code, status)
                 continue
 
             solver_config_path = f"{args.model_configs_dir}/{api}/{solver}.yaml"
@@ -129,3 +151,6 @@ for comp in args.comps:
 print("MISSING RUNS REPORT:")
 for comp, solver, pidx, N in missing_runs:
     print(f" - {comp} {solver} P{pidx} has only {N} runs")
+
+if leanlean_exit_code:
+    raise SystemExit(leanlean_exit_code)

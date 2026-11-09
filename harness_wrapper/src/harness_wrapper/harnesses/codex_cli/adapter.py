@@ -425,8 +425,6 @@ class CodexCLIAgent(Agent):
                 if native_type == "item.updated":
                     return []
                 output = item.get("aggregated_output", item.get("result"))
-                if output is None:
-                    return []
                 return [
                     AgentEvent(
                         type="tool_result",

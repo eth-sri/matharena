@@ -51,7 +51,11 @@ def test_native_web_tools_follow_network_permission(tmp_path, network, kind):
     elif kind is KimiCodeAgent:
         text = (tmp_path / ".harness_wrapper/minimal-kimi-agent.md").read_text()
         tools = {line.strip()[2:] for line in text.splitlines() if line.startswith("  - ")}
-        assert tools == ({"Bash", "WebSearch", "FetchURL"} if online else {"Bash"})
+        local = {
+            "Bash", "Read", "Write", "Edit", "Glob", "Grep",
+            "TaskList", "TaskOutput", "TaskStop", "WaitFor", "TodoList",
+        }
+        assert tools == local | ({"WebSearch", "FetchURL"} if online else set())
         assert "subagents: []" in text
     elif kind is QwenCodeAgent:
         assert ("--bare" in command) != online

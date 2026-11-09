@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 from collections import defaultdict
 from dotenv import load_dotenv
 from loguru import logger
@@ -7,6 +8,7 @@ from loguru import logger
 
 from matharena.request_logger import request_logger
 from matharena.container_runtime import add_container_runtime_argument
+from matharena.eval_run import prepare_run_directory
 from matharena.runner import Runner
 from matharena.solvers import PureModelSolver, SolverResponse
 
@@ -61,7 +63,14 @@ def _run_combined_pure_model_group(model_name, group):
     for runner, prepared in group:
         runner.print_final_status(prepared["status_path"])
 
-if __name__ == "__main__":
+def _positive_int(value):
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return number
+
+
+def main(argv=None):
     load_dotenv()
 
     # Main args: which competition to run with which models; how many runs per problem
@@ -87,7 +96,7 @@ if __name__ == "__main__":
         type=int,
         nargs="+",
         required=False,
-        help="List of 1-based problem indices to run, example: 1 2 3 (default: all problems in competition)",
+        help="1-based problem indices in scheduling order, e.g. 7 32 16 17 (default: all problems)",
     )
 
     # skip-existing is default
@@ -99,8 +108,16 @@ if __name__ == "__main__":
     parser.add_argument("--comp-configs-dir", type=str, default="configs/competitions")
     parser.add_argument("--model-configs-dir", type=str, default="configs/models")
     parser.add_argument("--output-dir", type=str, default="outputs")
+    parser.add_argument("--workers", type=_positive_int, help="Override concurrent_requests for this evaluation")
+    parser.add_argument("--shuffle-seed", type=int, help="Shuffle problems reproducibly, preserving their IDs")
+    parser.add_argument("--run-root", help="Freeze configs and local datasets in a fresh directory; save outputs there")
+    parser.add_argument("--prepare-only", action="store_true", help="Prepare --run-root without constructing solvers or calling models")
     add_container_runtime_argument(parser)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    if args.prepare_only and not args.run_root:
+        parser.error("--prepare-only requires --run-root")
+    if args.run_root and args.output_dir != "outputs":
+        parser.error("--run-root already selects an output directory; omit --output-dir")
 
     comp_n_overrides = {}
     for override in args.comp_n:
@@ -114,6 +131,19 @@ if __name__ == "__main__":
         except ValueError as exc:
             raise ValueError(f"Invalid n in --comp-n override '{override}'.") from exc
 
+    if args.run_root:
+        root = prepare_run_directory(
+            args.run_root, competitions=args.comp, models=args.models,
+            competition_configs=args.comp_configs_dir, model_configs=args.model_configs_dir,
+            workers=args.workers, shuffle_seed=args.shuffle_seed,
+        )
+        args.comp_configs_dir = str(root / "configs/competitions")
+        args.model_configs_dir = str(root / "configs/models")
+        args.output_dir = str(root / "outputs")
+        # A model and its host proxy must share one private credential store.
+        # An explicitly selected store (e.g. by Limits) takes precedence.
+        os.environ.setdefault("HARNESS_WRAPPER_AUTH_FILE", str(root / "auth/auth.json"))
+
     logger.info(f"Initializing runners for competitions: {args.comp}")
     runners = [
         Runner(
@@ -125,16 +155,30 @@ if __name__ == "__main__":
             args.output_dir,
             args.redo_all,
             container_runtime=args.container_runtime,
+            shuffle_seed=args.shuffle_seed,
         )
         for comp in args.comp
     ]
+
+    if args.run_root:
+        metadata = json.loads((root / "run.json").read_text())
+        metadata["runs_per_problem"] = {comp: comp_n_overrides.get(comp, args.n) for comp in args.comp}
+        metadata["problem_order"] = {
+            runner.comp_name: [p["problem_idx"] for p in runner.problems] for runner in runners
+        }
+        metadata["container_runtime"] = args.container_runtime
+        metadata["redo_all"] = args.redo_all
+        (root / "run.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    if args.prepare_only:
+        logger.info(f"Prepared {len(runners)} competitions in {root}; no model requests made.")
+        return
 
     # Run each model
     for model in args.models:
         logger.info(f"Calling runner for model: {model}")
         prepared_runs = []
         for runner in runners:
-            prepared = runner.prepare_run(model)
+            prepared = runner.prepare_run(model, workers=args.workers)
             if prepared is not None:
                 prepared_runs.append((runner, prepared))
 
@@ -169,3 +213,7 @@ if __name__ == "__main__":
                     status_path=prepared["status_path"],
                     solver_responses=responses,
                 )
+
+
+if __name__ == "__main__":
+    main()

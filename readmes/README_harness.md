@@ -12,7 +12,7 @@ configuration cannot silently turn an ordinary evaluation into an agentic one.
   setting instead. A harness name can select a different competition default.
 - A model can select `harness: codex`, `harness: claude`, `harness: kimi`,
   `harness: gravity`, `harness: qwen`, `harness: opencode`, `harness: deepcode`, `harness: grok`,
-  `harness: muse`, or `harness: vibe`.
+  `harness: muse`, `harness: vibe`, or `harness: dsh`.
 - A model can set `harness: false` to opt out of a competition's default harness.
 - With `allow_harness: false` (or absent), a requested harness is ignored with a warning.
   Every model uses its normal API path, including models requesting Codex. CLI version
@@ -33,6 +33,24 @@ native Codex `turn.completed` events with no answer. Claude and Muse also emit e
 results after exhausting their output-limit continuations, preserving reported usage
 and partial work. Transient connection failures remain errors. Lean runs still check
 and submit `Solution.lean` even when chat output is empty.
+
+## Monitoring and preflight
+
+A competition can enable the `harness_config.monitoring` flags independently.
+Use `diff` for source checkpoints, `cpu` and `ram` for host cgroup samples, and
+`commands` for command timing. Flags default to false. Attempts save monitoring
+data next to their workspaces in `WORKSPACE.telemetry/`.
+
+`command_monitoring_backend: host` records shell-tool boundaries and host-run
+checks in `host-commands.jsonl`. Each shell-tool call has one duration.
+`command_monitoring_backend: wrapper` needs a compatible image with tracing
+wrappers and writes supported process invocations to `commands.jsonl`.
+See [LeanLean command monitoring](README_leanlean.md#command-monitoring) for
+the monitoring modes used in October.
+
+Set `harness_config.preflight` to run a shell check inside the harness
+environment before model access. A timeout or nonzero exit status stops the
+attempt, with logs in `preflight_stdout.log` and `preflight_stderr.log`.
 
 ## ArxivMath August: SageMath and answer judging
 
@@ -502,8 +520,9 @@ at CLI invocation time:
 - Claude uses `--safe-mode`, `--disable-slash-commands`, an empty strict MCP configuration,
   a replacement system prompt, and `--tools Bash`.
 - Kimi uses `--skills-dir` with an empty directory and a generated, deterministic
-  `--agent-file` whose only enabled tool is `Bash`. The agent prompt contains no skill,
-  project-instruction, plugin, or base-prompt template variables.
+  `--agent-file` that enables shell, file, search, and task-management tools.
+  Web tools are enabled only when the sandbox has network access. The agent
+  prompt contains no skill, project-instruction, plugin, or base-prompt template variables.
 - Antigravity uses a fresh private home, disables slash expansion, and selects a custom agent
   whose declared tools are limited to local files, local search, and shell commands. Those
   commands run inside MathArena's hardened outer container sandbox; the CLI's nested sandbox is

@@ -161,6 +161,7 @@ def test_harness_seeds_neutral_conjecture_without_gold(tmp_path):
     from matharena.solvers.harness_solver import HarnessSolver
     solver = object.__new__(HarnessSolver)
     solver.harness_config = {}
+    solver.repo_eval = False
     solver.is_lean_comp = True
     solver.config = {"lean_task": "prove_or_disprove"}
     solver.toolchain_dir = "leanprover--lean4---v4.34.1"

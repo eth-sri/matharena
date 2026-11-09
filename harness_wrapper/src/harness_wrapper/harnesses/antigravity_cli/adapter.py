@@ -36,6 +36,26 @@ _AGENT_PROMPT = """Use only the local file and shell tools listed for this agent
 The writable project directory is /work. You have no internet access.
 Do not invoke subagents, plugins, skills, MCP servers, or remote-search tools.
 """
+def _strip_text_thought_signatures(path: str, payload: dict[str, Any]) -> None:
+    """Drop text-part thought signatures from model turns that also call a tool.
+
+    Gemini emits turns whose text part and function call each carry a
+    ``thoughtSignature``. Since 2026-11-04 ~18:08 UTC the API rejects any
+    history containing such a turn with 400 INVALID_ARGUMENT, so every resume
+    and later step fails. The function call keeps its own signature, which the
+    API still requires.
+    """
+
+    for turn in payload.get("contents") or ():
+        if not isinstance(turn, dict) or turn.get("role") != "model":
+            continue
+        parts = [part for part in turn.get("parts") or () if isinstance(part, dict)]
+        if any("functionCall" in part and "thoughtSignature" in part for part in parts):
+            for part in parts:
+                if "text" in part:
+                    part.pop("thoughtSignature", None)
+
+
 _EFFORT_ALIASES = {
     "minimal": "low",
     "xhigh": "high",
@@ -231,6 +251,7 @@ class AntigravityCLIAgent(Agent):
                 request_overrides=(override_provider() if callable(override_provider) else {}),
                 merge_request_overrides=True,
                 request_drop_fields=(drop_provider() if callable(drop_provider) else ()),
+                request_json_transform=_strip_text_thought_signatures,
                 listen_host=route.listen_host,
                 client_host=route.client_host,
                 allow_remote_clients=route.allow_remote_clients,
@@ -490,7 +511,11 @@ class AntigravityCLIAgent(Agent):
             result: list[AgentEvent] = []
             usage = payload.get("usage")
             if isinstance(usage, Mapping):
-                normalized_usage = self._take_api_usage() or self._usage_delta(session_id, usage)
+                # Advance native cumulative counters even when API usage wins.
+                # A later result without captured API responses must not report
+                # the whole session again after its earlier turns were charged.
+                native_usage = self._usage_delta(session_id, usage)
+                normalized_usage = self._take_api_usage() or native_usage
                 result.append(make("usage", normalized_usage))
             if str(payload.get("status", "")).upper() != "SUCCESS":
                 result.append(make("error", payload.get("error", payload)))

@@ -109,6 +109,9 @@ For example, to regrade all saved Project Euler runs with default settings:
 uv run python scripts/regrade.py --comps euler/euler
 ```
 
+LeanLean uses the same command to grade saved repository submissions. See the
+[LeanLean grading guide](README_leanlean.md#verify-and-score-submissions).
+
 Another useful helper is `scripts/nuke_single_run.py`, which removes a single saved attempt from a run file in `outputs/`.
 
 ### Inspecting and Debugging Runs

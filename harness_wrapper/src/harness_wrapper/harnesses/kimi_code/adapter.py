@@ -547,7 +547,12 @@ class KimiCodeAgent(Agent):
         skills_dir = state_dir / "empty-skills"
         agent_file = state_dir / "minimal-kimi-agent.md"
         skills_dir.mkdir(parents=True, exist_ok=True)
-        tools = ["Bash", "WebSearch", "FetchURL"] if self.internet_enabled else ["Bash"]
+        tools = [
+            "Bash", "Read", "Write", "Edit", "Glob", "Grep",
+            "TaskList", "TaskOutput", "TaskStop", "WaitFor", "TodoList",
+        ]
+        if self.internet_enabled:
+            tools.extend(("WebSearch", "FetchURL"))
         content = _MINIMAL_AGENT_FILE.format(tools="\n".join(f"  - {name}" for name in tools))
         if not agent_file.exists() or agent_file.read_text(encoding="utf-8") != content:
             agent_file.write_text(content, encoding="utf-8")

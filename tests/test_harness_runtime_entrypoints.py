@@ -24,10 +24,10 @@ def test_run_cli_passes_runtime_to_every_competition(monkeypatch, runtime):
     seen = []
 
     class FakeRunner:
-        def __init__(self, comp, *args, container_runtime):
+        def __init__(self, comp, *args, container_runtime, shuffle_seed=None):
             seen.append((comp, container_runtime))
 
-        def prepare_run(self, model):
+        def prepare_run(self, model, *, workers=None):
             return None
 
     monkeypatch.setattr("matharena.runner.Runner", FakeRunner)

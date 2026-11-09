@@ -21,9 +21,9 @@ import subprocess
 import tempfile
 import threading
 import time
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, override
@@ -48,6 +48,7 @@ from loguru import logger
 
 from matharena.api_client import APIClient
 from matharena.container_runtime import validate_container_runtime
+from matharena.monitoring import AttemptMonitor, ContainerResources, monitoring_flags
 from matharena.solvers import BaseSolver, SolverResponse
 from matharena.solvers.run_budget import RunBudget
 from matharena.solvers.native_usage import NativeUsageReader
@@ -134,6 +135,8 @@ HARNESS_EXECUTABLES = {
     "deepcode": "deepcode",
     "deepcode-cli": "deepcode",
     "deep-code": "deepcode",
+    "dsh": "dsh",
+    "deepseek-harness": "dsh",
     "vibe": "vibe",
     "vibe-cli": "vibe",
     "mistral-vibe": "vibe",
@@ -169,6 +172,8 @@ HARNESS_RELEASES = {
     "deepcode": "deepcode",
     "deepcode-cli": "deepcode",
     "deep-code": "deepcode",
+    "dsh": "deepseek-harness",
+    "deepseek-harness": "deepseek-harness",
     "vibe": "mistral-vibe",
     "vibe-cli": "mistral-vibe",
     "mistral-vibe": "mistral-vibe",
@@ -322,6 +327,10 @@ class DockerHarnessSandbox(Sandbox):
             check=False,
         )
 
+    @property
+    def _relay_executable(self) -> str:
+        return self.docker_executable
+
     @contextmanager
     def expose_host_service(self) -> Iterator[HostServiceRoute]:
         if self._host_service_network is not None:
@@ -453,6 +462,23 @@ class HarnessSolver(BaseSolver):
         if not isinstance(raw_harness_config, dict):
             raise TypeError("harness_config must be a mapping")
         self.harness_config = raw_harness_config.copy()
+        self.repo_eval = self.harness_config.get("repo_eval", self.harness_config.get("leanlean_projects", False))
+        if not isinstance(self.repo_eval, bool):
+            raise TypeError("harness_config.repo_eval must be a boolean")
+        self.helper_files = self.harness_config.get("helper_files")
+        if self.helper_files is not None and (not isinstance(self.helper_files, str) or not self.helper_files):
+            raise TypeError("harness_config.helper_files must be a directory path or null")
+        self.monitoring = monitoring_flags(self.harness_config.get("monitoring"))
+        self.command_backend = self.harness_config.get("command_monitoring_backend", "host")
+        if self.command_backend not in {"host", "wrapper"}:
+            raise ValueError("harness_config.command_monitoring_backend must be host or wrapper")
+        self.preflight = self.harness_config.get("preflight")
+        if self.preflight is not None and (
+            not isinstance(self.preflight, str) or not self.preflight.strip()
+        ):
+            raise TypeError("harness_config.preflight must be a non-empty shell command or null")
+        self._attempt_monitors = {}
+        self._response_attempts = {}
         self.harness_config.pop("container_runtime", None)
         self.container_runtime = validate_container_runtime(container_runtime)
         if not isinstance(self.harness_config.get("direct_network", False), bool):
@@ -484,7 +510,7 @@ class HarnessSolver(BaseSolver):
         if not self.tools_enabled:
             self.minimal_context = True
         self.run_check_after_harness = bool(
-            self.harness_config.get("run_check_after_harness", self.is_lean_comp)
+            self.harness_config.get("run_check_after_harness", self.is_lean_comp and not self.repo_eval)
         )
         if self.harness_key not in HARNESS_RELEASES and not (
             self.harness_config.get("container_image")
@@ -645,6 +671,26 @@ class HarnessSolver(BaseSolver):
 
     @override
     def last_chance(self, previous_response: SolverResponse) -> SolverResponse:
+        attempt = self._response_attempts.get(id(previous_response))
+        budget, _ = self._response_budgets.get(id(previous_response), (None, None))
+        if (
+            attempt is None or not any(self.monitoring.values())
+            or id(previous_response) not in self._response_agents
+            or previous_response.detailed_cost.get("refusal_category") == "reasoning_extraction"
+            or (budget and (budget.exceeded() or budget.cost_grace is not None))
+        ):
+            return self._resume_response(previous_response)
+        workspace, sandbox, payload, problem_idx, run_idx = attempt
+        with self._attempt_context(workspace, sandbox, payload, problem_idx, run_idx) as (monitor, _):
+            monitor.phase = "model"
+            try:
+                response = self._resume_response(previous_response)
+            finally:
+                sandbox.stop()
+        response.history[-1]["monitoring"] = self._monitor_history(monitor)
+        return response
+
+    def _resume_response(self, previous_response: SolverResponse) -> SolverResponse:
         if previous_response.detailed_cost.get("refusal_category") == "reasoning_extraction":
             return previous_response
         agent = self._response_agents.get(id(previous_response))
@@ -730,8 +776,158 @@ class HarnessSolver(BaseSolver):
             raise ValueError("HarnessSolver currently supports text problems only")
         workspace = self._workspace_for(problem_idx, run_idx)
         self._prepare_workspace(workspace, payload)
-        model = self._build_model()
+        if self.helper_files is not None:
+            from matharena.repo_eval import copy_helper_files
+            copy_helper_files(Path(self.helper_files), workspace)
         sandbox = self._build_sandbox(workspace)
+        return self._solve_prepared(batch_idx, payload, problem_idx, run_idx, workspace, sandbox)
+
+    def _solve_prepared(self, batch_idx, payload, problem_idx, run_idx, workspace, sandbox):
+        with self._attempt_context(workspace, sandbox, payload, problem_idx, run_idx) as (monitor, environment):
+            try:
+                self._preflight(workspace, sandbox, environment)
+                if monitor is not None:
+                    monitor.assert_ready(require_commands=bool(self.preflight) and self.monitoring["commands"] and self.command_backend == "wrapper")
+                    monitor.phase = "model"
+                    monitor.capture("model_start")
+
+                def model_finished():
+                    if monitor is not None:
+                        monitor.capture("model_end")
+                        monitor.phase = "postcheck"
+
+                def observe(event):
+                    current = self._attempt_monitors.get(workspace)
+                    if current is not None:
+                        current.on_event(event)
+
+                response = self._run_prepared(
+                    batch_idx, payload, problem_idx, run_idx, workspace, sandbox,
+                    environment=environment, on_event=observe, after_run=model_finished,
+                )
+            finally:
+                # Stop background writers before archiving submitted files.
+                if monitor is not None or self.preflight is not None or self.repo_eval:
+                    sandbox.stop()
+            self._finalize_attempt(response, payload, workspace, sandbox, monitor)
+        if monitor is not None:
+            response.history[0]["monitoring"] = self._monitor_history(monitor)
+        if id(response) in self._response_agents:
+            self._response_attempts[id(response)] = (workspace, sandbox, payload, problem_idx, run_idx)
+        if not self.keep_workspaces:
+            shutil.rmtree(workspace)
+        return response
+
+    @staticmethod
+    def _monitor_history(monitor):
+        if not monitor.summary["complete"]:
+            logger.warning("Harness telemetry is incomplete; inspect {}", monitor.output / "summary.json")
+        return {
+            "directory": str(monitor.output), "summary": str(monitor.output / "summary.json"),
+            "complete": monitor.summary["complete"],
+        }
+
+    def _attempt_environment(self, payload):
+        return self._agent_environment()
+
+    def _source_directory(self, workspace):
+        return workspace / "repository" if self.repo_eval else workspace
+
+    def _monitor_metadata(self, payload):
+        return {}
+
+    @contextmanager
+    def _attempt_context(self, workspace, sandbox, payload, problem_idx, run_idx):
+        environment = self._attempt_environment(payload)
+        monitor = None
+        if any(self.monitoring.values()):
+            resources = (
+                ContainerResources(sandbox._relay_executable, sandbox.container_name,
+                                   cpu=self.monitoring["cpu"], ram=self.monitoring["ram"])
+                if self.monitoring["cpu"] or self.monitoring["ram"] else None
+            )
+            monitor = AttemptMonitor(
+                workspace, source_root=self._source_directory(workspace),
+                interval_s=float(self.harness_config.get("snapshot_interval_s", 30)),
+                resource_interval_s=float(self.harness_config.get("resource_interval_s", 1)),
+                resources=resources, command_backend=self.command_backend,
+                compress_model_requests=self.harness_config.get("compress_model_requests", False),
+                **self.monitoring,
+                metadata={"container_image": sandbox.image, "harness": self.harness,
+                          "problem_idx": problem_idx, "run_idx": run_idx,
+                          **self._monitor_metadata(payload)},
+            )
+        original_mounts = getattr(sandbox, "mounts", ())
+        with monitor if monitor is not None else nullcontext():
+            if monitor is not None and self.monitoring["commands"] and self.command_backend == "wrapper":
+                from matharena.monitoring.commands import CONTAINER_SOCKET, SOCKET_ENV
+                sandbox.mounts = (*original_mounts, SandboxMount(monitor.socket_path, PurePosixPath(CONTAINER_SOCKET)))
+                environment[SOCKET_ENV] = CONTAINER_SOCKET
+            if monitor is not None:
+                self._attempt_monitors[workspace] = monitor
+            try:
+                yield monitor, environment
+            finally:
+                self._attempt_monitors.pop(workspace, None)
+                if monitor is not None and self.monitoring["commands"] and self.command_backend == "wrapper":
+                    sandbox.mounts = original_mounts
+
+    def _preflight(self, workspace, sandbox, environment):
+        if self.preflight is None:
+            return
+        command = self.preflight
+        if self.monitoring["commands"] and self.command_backend == "wrapper":
+            from matharena.monitoring.commands import TRACE_VERSION
+            command = f'test "$(cat /opt/leanlean/command-trace-version)" = {TRACE_VERSION} || exit 1\n' + command
+        try:
+            result = self._run_sandbox_command(workspace, sandbox, ["sh", "-c", command],
+                environment, float(self.harness_config.get("preflight_timeout_s", 1800)))
+        except subprocess.TimeoutExpired as exc:
+            for name, output in (("stdout", exc.stdout), ("stderr", exc.stderr)):
+                text = output.decode(errors="replace") if isinstance(output, bytes) else (output or "")
+                _write_text(workspace / f"preflight_{name}.log", text)
+            raise
+        _write_text(workspace / "preflight_stdout.log", result.stdout)
+        _write_text(workspace / "preflight_stderr.log", result.stderr)
+        if result.returncode:
+            raise RuntimeError(f"Harness preflight failed; see {workspace}/preflight_stderr.log")
+
+    def _run_sandbox_command(self, workspace, sandbox, command, environment, timeout):
+        monitor = self._attempt_monitors.get(workspace)
+        recorder = getattr(monitor, "host_commands", None)
+        if recorder is None:
+            return sandbox.run(command, env=environment, timeout=timeout)
+        with recorder.lifecycle(command, monitor.phase) as status:
+            result = sandbox.run(command, env=environment, timeout=timeout)
+            status["returncode"] = result.returncode
+            return result
+
+    def _finalize_attempt(self, response, payload, workspace, sandbox, monitor):
+        """Dataset adapters may capture file submissions after the container stops."""
+        if self.repo_eval:
+            from matharena.repo_eval import snapshot_repository
+            output = monitor.output / "submission" if monitor is not None else None
+            response.history[0]["repo_submission"] = snapshot_repository(workspace, output=output)
+            response.history[0]["eval_type"] = "repo"
+            response.detailed_cost["deferred_grading"] = True
+            self._response_agents.pop(id(response), None)
+            self._response_budgets.pop(id(response), None)
+
+    def _run_prepared(
+        self,
+        batch_idx: int,
+        payload: str | dict[str, Any] | None,
+        problem_idx: int,
+        run_idx: int,
+        workspace: Path,
+        sandbox: DockerHarnessSandbox | PodmanHarnessSandbox,
+        *,
+        environment: dict[str, str] | None = None,
+        on_event: Callable[[AgentEvent], None] | None = None,
+        after_run: Callable[[], None] | None = None,
+    ) -> SolverResponse:
+        environment = environment if environment is not None else self._agent_environment()
+        model = self._build_model()
         budget = None
         if any(
             self.harness_config.get(key) is not None
@@ -762,6 +958,13 @@ class HarnessSolver(BaseSolver):
                 )
         else:
             prompt = self.build_prompt(payload)
+
+        def observe(event):
+            if on_event is not None:
+                on_event(event)
+            if budget and event.type == "usage":
+                budget.usage(agent.get_tokens())
+
         agent = Agent(
             type=self.harness,
             model=model,
@@ -776,18 +979,12 @@ class HarnessSolver(BaseSolver):
                 bool(self.harness_config.get("validate_version", False))
                 and self._harness_cli is None
             ),
-            environment=self._agent_environment(),
+            environment=environment,
             minimal_context=self.minimal_context,
             tools_enabled=self.tools_enabled,
             model_context_window=self.harness_config.get("model_context_window"),
             on_model_response=budget.capture_response if budget else None,
-            on_event=(
-                lambda event: budget.usage(agent.get_tokens())
-                if event.type == "usage"
-                else None
-            )
-            if budget
-            else None,
+            on_event=observe if (on_event is not None or budget) else None,
             should_stop=budget.exceeded if budget and budget.has_limits else None,
             auto_wait=bool(self.harness_config.get("auto_wait", True)),
             auto_fallback=bool(self.harness_config.get("auto_fallback", True)),
@@ -818,13 +1015,12 @@ class HarnessSolver(BaseSolver):
             not refusal and final_result is not None
             and not str(final_result.content or "").strip()
         )
+        if after_run is not None:
+            after_run()
         check_result = None
         if self.run_check_after_harness and not refusal and not (budget and budget.exceeded()):
-            check_result = sandbox.run(
-                ["./check.sh"],
-                env=self._agent_environment(),
-                timeout=float(self.harness_config.get("check_timeout_s", 600)),
-            )
+            check_result = self._run_sandbox_command(workspace, sandbox, ["./check.sh"],
+                environment, float(self.harness_config.get("check_timeout_s", 600)))
             _write_text(workspace / "check_stdout.log", check_result.stdout)
             _write_text(workspace / "check_stderr.log", check_result.stderr)
 
@@ -909,8 +1105,6 @@ class HarnessSolver(BaseSolver):
             self._response_agents[id(response)] = agent
             if budget:
                 self._response_budgets[id(response)] = (budget, sandbox)
-        if not self.keep_workspaces:
-            shutil.rmtree(workspace)
         return response
 
     def _run_with_budget(self, agent, sandbox, budget, prompt, *, resume=False):
@@ -1024,6 +1218,9 @@ class HarnessSolver(BaseSolver):
                 raise ValueError(f"harness_config.home_files path escapes HOME: {name}")
             target.parent.mkdir(parents=True, exist_ok=True)
             _write_text(target, str(content))
+        if self.repo_eval:
+            self._prepare_repository(workspace, payload)
+            return
         if not self.is_lean_comp:
             return
         formal = (
@@ -1048,6 +1245,14 @@ class HarnessSolver(BaseSolver):
             _write_text(solution_path, initial_solution)
         _write_text(workspace / "check.sh", self._lean_check_script())
         (workspace / "check.sh").chmod(0o755)
+
+    def _prepare_repository(self, workspace, payload):
+        source = payload.get("repository_path") if isinstance(payload, dict) else None
+        if source is None:
+            (workspace / "repository").mkdir()
+        else:
+            shutil.copytree(source, workspace / "repository", symlinks=True,
+                            ignore=shutil.ignore_patterns(".git", ".lake", "__pycache__"))
 
     @staticmethod
     def _reset_workspace(workspace: Path) -> None:
@@ -1129,6 +1334,8 @@ class HarnessSolver(BaseSolver):
             "deepcode",
             "deepcode-cli",
             "deep-code",
+            "dsh",
+            "deepseek-harness",
             "vibe",
             "vibe-cli",
             "mistral-vibe",
@@ -1288,7 +1495,7 @@ class HarnessSolver(BaseSolver):
                 f"Harnesses require an OpenAI- or Anthropic-compatible endpoint, got {client.api!r}"
             )
         openrouter_claude = requested_api == "openrouter" and self.harness_key in {
-            "claude", "claude-code", "anthropic"
+            "claude", "claude-code", "anthropic", "dsh", "deepseek-harness"
         }
         base_url = client.base_url or (
             "https://api.openai.com/v1"
@@ -1296,7 +1503,7 @@ class HarnessSolver(BaseSolver):
             else "https://api.anthropic.com"
         )
         if openrouter_claude:
-            # Claude Code speaks Messages, not Chat Completions, through this gateway.
+            # Claude Code and dsh speak Messages, not Chat Completions, through this gateway.
             protocol = "anthropic"
             base_url = "https://openrouter.ai/api"
         upstream_headers = dict(client.default_headers or {})
@@ -1411,7 +1618,7 @@ class HarnessSolver(BaseSolver):
             "--cap-drop",
             "ALL",
             "--user",
-            f"{os.getuid()}:{os.getgid()}",
+            str(self.harness_config.get("container_user", f"{os.getuid()}:{os.getgid()}")),
             "--tmpfs",
             f"{CONTAINER_TMPDIR}:rw,nosuid,nodev,size={self.harness_config.get('tmpfs_size', '1g')},mode=1777",
         ]
@@ -1469,8 +1676,12 @@ class HarnessSolver(BaseSolver):
             if self.container_runtime == "podman"
             else DockerHarnessSandbox
         )
+        engine_argument = (
+            "podman_executable" if self.container_runtime == "podman" else "docker_executable"
+        )
         return sandbox_class(
             root=workspace,
+            **{engine_argument: str(self.harness_config.get("container_engine", self.container_runtime))},
             network_enabled=bool(self.harness_config.get("direct_network", False)),
             image=image,
             container_root=DEFAULT_CONTAINER_ROOT,
@@ -1512,7 +1723,8 @@ class HarnessSolver(BaseSolver):
         if usage is None:
             usage = agent.get_tokens()
         cached = usage.cache_read_tokens
-        if self.harness.lower() in {"claude", "claude-code", "anthropic"}:
+        if self.harness.lower() in {"claude", "claude-code", "anthropic", "dsh", "deepseek-harness"}:
+            # Messages usage reports input_tokens without cache reads.
             total_input = usage.input_tokens + cached
         else:
             total_input = usage.input_tokens
@@ -1635,6 +1847,11 @@ def _coalesce_grok_events(events: Sequence[AgentEvent]) -> Iterator[AgentEvent]:
 def _events_to_messages(
     events: Sequence[AgentEvent], *, harness: str | None = None
 ) -> list[dict[str, Any]]:
+    # Late background events stay in raw history, after the submitted answer.
+    for index in range(len(events) - 1, -1, -1):
+        if events[index].type == "result":
+            events = events[: index + 1]
+            break
     # Other harnesses can emit both text deltas and complete message snapshots.
     # Only Grok's deltas are authoritative here; treating all harnesses alike
     # would duplicate their assistant responses.

@@ -4,6 +4,7 @@ from .antigravity_cli import AntigravityCLIAgent
 from .claude_code import ClaudeCodeAgent
 from .codex_cli import CodexCLIAgent
 from .deepcode import DeepCodeAgent
+from .deepseek_harness import DeepSeekHarnessAgent
 from .grok_build import GrokBuildAgent
 from .kimi_code import KimiCodeAgent
 from .mistral_vibe import MistralVibeAgent
@@ -15,6 +16,7 @@ __all__ = [
     "ClaudeCodeAgent",
     "CodexCLIAgent",
     "DeepCodeAgent",
+    "DeepSeekHarnessAgent",
     "GrokBuildAgent",
     "AntigravityCLIAgent",
     "KimiCodeAgent",
