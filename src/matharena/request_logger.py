@@ -22,11 +22,18 @@ class RequestLogger:
         self.comp_name = None
         self.solver_name = None
         self.batch_idx_to_problem_idx = None
+        self.batch_idx_to_comp_name = None
 
-    def set_metadata(self, comp_name, solver_name, batch_idx_to_problem_idx):
+    def set_metadata(self, comp_name, solver_name, batch_idx_to_problem_idx, batch_idx_to_comp_name=None):
         self.comp_name = comp_name
         self.solver_name = solver_name
         self.batch_idx_to_problem_idx = batch_idx_to_problem_idx
+        self.batch_idx_to_comp_name = batch_idx_to_comp_name
+
+    def _comp_name(self, batch_idx):
+        if self.batch_idx_to_comp_name is None:
+            return self.comp_name
+        return self.batch_idx_to_comp_name.get(batch_idx, self.comp_name)
 
     def _redact_for_logging(self, value):
         if not self.redact_images:
@@ -84,7 +91,7 @@ class RequestLogger:
 
             data = OrderedDict(
                 {
-                    "comp_name": self.comp_name,
+                    "comp_name": self._comp_name(batch_idx),
                     "solver_name": self.solver_name,
                     "timestamp": ts,
                     "problem_idx": problem_idx,
@@ -113,7 +120,7 @@ class RequestLogger:
                 logger.warning(f"Recovering response log after unreadable request log {logfile}: {exc}")
                 data = OrderedDict(
                     {
-                        "comp_name": self.comp_name,
+                        "comp_name": self._comp_name(batch_idx),
                         "solver_name": self.solver_name,
                         "timestamp": ts,
                         "problem_idx": problem_idx,
