@@ -60,6 +60,9 @@ SUPPORTED_CLI_RELEASES: Mapping[str, CLIRelease] = {
     "qwen-code": CLIRelease("qwen-code", "@qwen-code/qwen-code", DEFAULT_CLI_VERSION, "qwen"),
     "opencode": CLIRelease("opencode", "opencode-ai", DEFAULT_CLI_VERSION, "opencode"),
     "deepcode": CLIRelease("deepcode", "@vegamo/deepcode-cli", DEFAULT_CLI_VERSION, "deepcode"),
+    "deepseek-harness": CLIRelease(
+        "deepseek-harness", "@deepseek-ai/dsh", DEFAULT_CLI_VERSION, "dsh"
+    ),
     "mistral-vibe": CLIRelease(
         "mistral-vibe", "mistralai/mistral-vibe", DEFAULT_CLI_VERSION, "vibe"
     ),
@@ -83,6 +86,14 @@ _VIBE_RELEASE_API = "https://api.github.com/repos/mistralai/mistral-vibe/release
 _NPM_REGISTRY = "https://registry.npmjs.org"
 _VERSION_RE = re.compile(r"^\d+(?:\.\d+){2}(?:[-+][0-9A-Za-z.-]+)?$")
 _NPM_DISTRIBUTIONS = frozenset({"qwen-code", "opencode", "deepcode"})
+# dsh requires Node >=24.9 while sandbox images ship Node 22, so its cache
+# bundles this official Node release and installs dsh with that release's npm.
+_DSH_NODE_VERSION = "24.22.2"
+_NODE_DIST_BASE = "https://nodejs.org/dist"
+_DSH_ENTRYPOINT = """#!/bin/sh
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+exec "$root/node/bin/node" "$root/lib/node_modules/@deepseek-ai/dsh/lib/bin.js" "$@"
+"""
 
 
 @dataclass(frozen=True)
@@ -545,7 +556,71 @@ def _install_npm_release(
     entrypoint = package / "bin" / release.executable
     if not entrypoint.exists():
         raise RuntimeError(f"npm package {release.spec} did not install bin/{release.executable}")
+    _commit_npm_package(package, entrypoint, root)
 
+
+def _node_filename(target: str) -> str:
+    return f"node-v{_DSH_NODE_VERSION}-{target}.tar.xz"
+
+
+def _install_dsh(release: CLIRelease, target: str, root: Path, temporary: Path) -> None:
+    """Install dsh with a private Node runtime that also runs inside sandbox images."""
+
+    package = temporary / release.name
+    filename = _node_filename(target)
+    base = f"{_NODE_DIST_BASE}/v{_DSH_NODE_VERSION}"
+    request = urllib.request.Request(
+        f"{base}/SHASUMS256.txt", headers={"User-Agent": "harness-wrapper"}
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:
+        sums = response.read().decode()
+    checksum = next(
+        (line.split()[0] for line in sums.splitlines() if line.endswith(f"  {filename}")),
+        None,
+    )
+    if checksum is None:
+        raise RuntimeError(f"{filename} is absent from {base}/SHASUMS256.txt")
+    archive = temporary / filename
+    _verified_download(f"{base}/{filename}", checksum, archive)
+    node_root = package / "node"
+    node_root.mkdir(parents=True)
+    prefix = f"node-v{_DSH_NODE_VERSION}-{target}/"
+    with tarfile.open(archive, "r:xz") as bundle:
+        members = []
+        for member in bundle.getmembers():
+            if not member.name.startswith(prefix):
+                continue
+            member.name = member.name.removeprefix(prefix)
+            if member.name:
+                members.append(member)
+        bundle.extractall(node_root, members=members, filter="data")
+    node_bin = node_root / "bin"
+    subprocess.run(
+        [
+            str(node_bin / "npm"),
+            "install",
+            "--global",
+            "--prefix",
+            str(package),
+            "--omit=dev",
+            "--no-audit",
+            "--no-fund",
+            release.spec,
+        ],
+        check=True,
+        env={**os.environ, "PATH": os.pathsep.join((str(node_bin), os.environ.get("PATH", "")))},
+    )
+    if not (package / "lib/node_modules/@deepseek-ai/dsh/lib/bin.js").is_file():
+        raise RuntimeError(f"npm package {release.spec} did not install lib/bin.js")
+    # npm links bin/dsh to a `#!/usr/bin/env node` script; pin the bundled Node instead.
+    entrypoint = package / "bin" / release.executable
+    entrypoint.unlink(missing_ok=True)
+    entrypoint.write_text(_DSH_ENTRYPOINT, encoding="utf-8")
+    entrypoint.chmod(0o755)
+    _commit_npm_package(package, entrypoint, root)
+
+
+def _commit_npm_package(package: Path, entrypoint: Path, root: Path) -> None:
     paths = sorted(
         package.rglob("*"),
         key=lambda path: (path == entrypoint, len(path.parts), str(path)),
@@ -572,6 +647,11 @@ def _download_urls(releases: Sequence[CLIRelease]) -> list[str]:
     urls: list[str] = []
     for release in releases:
         if release.name in _NPM_DISTRIBUTIONS:
+            urls.append(f"npm:{release.spec}")
+        elif release.name == "deepseek-harness":
+            urls.append(
+                f"{_NODE_DIST_BASE}/v{_DSH_NODE_VERSION}/{_node_filename(claude_target)}"
+            )
             urls.append(f"npm:{release.spec}")
         elif release.name == "grok-build":
             urls.append(f"{_GROK_DOWNLOAD_BASE}/grok-{release.version}-{_grok_target(claude_target)}")
@@ -644,6 +724,9 @@ def install_clis(
         for release in releases:
             if release.name in _NPM_DISTRIBUTIONS:
                 _install_npm_release(release, root, temporary, npm)
+                continue
+            if release.name == "deepseek-harness":
+                _install_dsh(release, claude_target, root, temporary)
                 continue
             if release.name == "grok-build":
                 downloaded = _install_grok(release, _grok_target(claude_target), temporary)

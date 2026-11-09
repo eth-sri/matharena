@@ -1,0 +1,360 @@
+{
+  "schema_version": 1,
+  "name": "leanlean-october-2026",
+  "problem_order": [
+    "PALOMAR-2026-10-13-000010-v2",
+    "PALOMAR-2026-10-21-000008-v1",
+    "PALOMAR-2026-10-19-000009-v1",
+    "PALOMAR-2026-10-05-000003-v2",
+    "PALOMAR-2026-10-11-000008-v1",
+    "PALOMAR-2026-10-11-000001-v1",
+    "PALOMAR-2026-10-21-000001-v1",
+    "PALOMAR-2026-10-07-000001-v1",
+    "PALOMAR-2026-10-09-000008-v1",
+    "PALOMAR-2026-10-09-000007-v1",
+    "PALOMAR-2026-10-10-000002-v1",
+    "PALOMAR-2026-10-08-000003-v1",
+    "PALOMAR-2026-10-04-000004-v1",
+    "PALOMAR-2026-10-22-000015-v1",
+    "PALOMAR-2026-10-06-000011-v1",
+    "PALOMAR-2026-10-16-000013-v1",
+    "PALOMAR-2026-10-04-000005-v1",
+    "PALOMAR-2026-10-11-000004-v2",
+    "PALOMAR-2026-10-11-000007-v1",
+    "PALOMAR-2026-10-04-000007-v1",
+    "PALOMAR-2026-10-18-000020-v1",
+    "PALOMAR-2026-10-01-000020-v1",
+    "PALOMAR-2026-10-04-000011-v1",
+    "PALOMAR-2026-10-19-000019-v1",
+    "PALOMAR-2026-10-18-000023-v2",
+    "PALOMAR-2026-10-14-000005-v1",
+    "PALOMAR-2026-10-17-000013-v1",
+    "PALOMAR-2026-10-07-000005-v1",
+    "PALOMAR-2026-10-21-000002-v2",
+    "PALOMAR-2026-10-03-000001-v2",
+    "PALOMAR-2026-10-16-000012-v1",
+    "PALOMAR-2026-10-18-000029-v1"
+  ],
+  "entries": [
+    {
+      "id": "PALOMAR-2026-10-18-000029",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-18-000029-v1.json",
+      "title": "Galvin's theorem, the Dinitz problem and stable matchings",
+      "source": {
+        "repository": "jtraverso/galvin-dinitz",
+        "commit": "0aa98fc17e1e96ec408f7bad3198ce37a08d26fc"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-16-000012",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-16-000012-v1.json",
+      "title": "Connected counterexamples to the exact color-critical two-eigenvalue bound",
+      "source": {
+        "repository": "shaikidris/kkp-connected-spectral-counterexamples",
+        "commit": "c611a4a733fe796809cd941f96ff8f2c294fd1ef"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-03-000001",
+      "version": 2,
+      "path": "entries/PALOMAR-2026-10-03-000001-v2.json",
+      "title": "Continuity of solutions to abstract linear control systems",
+      "source": {
+        "repository": "frederic-marbach/alcs",
+        "commit": "bda56576f8b2730b73a55f273511c80fabbe56f4"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-07-000005",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-07-000005-v1.json",
+      "title": "Linear upper bounds for the first Betti number of four-generated numerical semigroups",
+      "source": {
+        "repository": "BenKeene/semigroup-betti",
+        "commit": "c94da4f5cb07e2ccf62c9ae18887aedd73e95bf2"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-17-000013",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-17-000013-v1.json",
+      "title": "Growth series of the triangle Coxeter groups (p, q, infinity), with the PGL(2,Z) instance: Padovan sphere sizes and growth rate the plastic number",
+      "source": {
+        "repository": "stalex444/triangle-group-growth",
+        "commit": "874b6a264e1eb8adf06141686eabab8a7afbe583"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-14-000005",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-14-000005-v1.json",
+      "title": "Heterogeneous Hegselmann–Krause dynamics: counterexamples to two conjectures and a theorem of Mirtabatabaei and Bullo",
+      "source": {
+        "repository": "JD-Jones-ASES/hk-heterogeneous-lean",
+        "commit": "c2d4c0b790210870f2818fc52a1c572937644a4b"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-21-000002",
+      "version": 2,
+      "path": "entries/PALOMAR-2026-10-21-000002-v2.json",
+      "title": "Wu 2008 Lemma 2.2, Chen's double sieve inequality, with the range of the last sum repaired",
+      "source": {
+        "repository": "sthubbar/goldbach-lean",
+        "commit": "4501f42c25c951fc2e461801ec661fdb3969a022"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-18-000023",
+      "version": 2,
+      "path": "entries/PALOMAR-2026-10-18-000023-v2.json",
+      "title": "Normalizers of Γ_Δ(N): the group M_Δ, finiteness, and a coset count",
+      "source": {
+        "repository": "F-Najman/normalizer-lean",
+        "commit": "17c911351938f13d620262a54de45c275db9de57"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-19-000019",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-19-000019-v1.json",
+      "title": "Bergman projection weak type constants",
+      "source": {
+        "repository": "CoolRmal/bergman-weak-type",
+        "commit": "600df3646a6070299e831b565a3be0585483ee2c"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-04-000011",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-04-000011-v1.json",
+      "title": "Fundamental Groups of Arbitrary Two-Cell Attachments",
+      "source": {
+        "repository": "Arthur742Ramos/cell-attachment-lean",
+        "commit": "1c671038e320cecc58ca1d81dca11bbe2e2a507c"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-01-000020",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-01-000020-v1.json",
+      "title": "Linnik's constant is at most 3.99: A formalization of a weighted version of Heath-Brown's near-density estimate, and of the proof's certificate checker",
+      "source": {
+        "repository": "enaslund/linniks-constant-3.99",
+        "commit": "ecdbe3e3e08ad499d2c749ff417cc461f57334c5"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-18-000020",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-18-000020-v1.json",
+      "title": "The radian nine-gon is Euclidean Ramsey iff e^(i theta) is algebraic",
+      "source": {
+        "repository": "wstrinz/radian-ramsey",
+        "commit": "37716c59241154354fcc23522253cac7416d6e2c"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-11-000007",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-11-000007-v1.json",
+      "title": "Matrix multiplication: omega at most 9/4 over every ring",
+      "source": {
+        "repository": "selanavot/omega_le_nine_quarters_all_rings",
+        "commit": "9d10116c89f9bdcdaccd58aacea353d4b7ae6e90"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-11-000004",
+      "version": 2,
+      "path": "entries/PALOMAR-2026-10-11-000004-v2.json",
+      "title": "Exponential separation of analytic self-conformal sets on the real line: Lean formalisation",
+      "source": {
+        "repository": "sascha2718/lean-dual-analytic-ifs",
+        "commit": "0155d92226966a90fa219bbcb9d44d2ed89d84d2"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-04-000007",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-04-000007-v1.json",
+      "title": "Effective approximation and low-intensity flatness of RAF critical-window profiles",
+      "source": {
+        "repository": "mmislan/palomar-p046-critical-window-shape-law",
+        "commit": "b46f8d0747b6dfb4c00a50d386f3df4f330e861e"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-04-000005",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-04-000005-v1.json",
+      "title": "Identifying the rooted species tree from unrooted gene trees under the coalescent",
+      "source": {
+        "repository": "vltanh/lean4-adr11",
+        "commit": "2db7f81359758bc49f52bc13c51f2640f8f2a7fd"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-16-000013",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-16-000013-v1.json",
+      "title": "Finite Observations and Recognition of the Compact Albert Algebra",
+      "source": {
+        "repository": "macgregor-sudo/compact-albert-recognition",
+        "commit": "40d3b344180d9ddb78aaa2876873377c1e631515"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-06-000011",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-06-000011-v1.json",
+      "title": "Structured orthogonal and unitary matrices: factorization, geometry and singularities",
+      "source": {
+        "repository": "alialiev78/gs_Lean_formalization",
+        "commit": "1270ba6cf3050f53a4beb98f0d65ab7459d4494b"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-22-000015",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-22-000015-v1.json",
+      "title": "Dimension growth, polynomial in the degree (Castryck–Cluckers–Dittmann–Nguyen)",
+      "source": {
+        "repository": "jasondavies/ccdn-dimension-growth",
+        "commit": "bb025e7207f3a35a21b898629f5678b72aa7e44f"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-08-000003",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-08-000003-v1.json",
+      "title": "Improved exponents for 3SUM and APSP from triangles in sparse lopsided graphs",
+      "source": {
+        "repository": "qawbecrdtey/ImprovedExponents",
+        "commit": "0725f2477587d67212936777b8a264c9793ac7bb"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-10-000002",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-10-000002-v1.json",
+      "title": "Nearly minimax variance estimation under rough random design",
+      "source": {
+        "repository": "pmaronow/ccv-palomar",
+        "commit": "f3ef2ef312d44bbc693c1d5bea9cee654a29b598"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-09-000007",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-09-000007-v1.json",
+      "title": "Strict Neumann Polya inequality on simply connected planar domains",
+      "source": {
+        "repository": "QuanyuTang/polya-neumann-simply-connected-formalization-Palomar-version-v2",
+        "commit": "f07f1c7051862ba146429db6eda5dc4e8b020f74"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-09-000008",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-09-000008-v1.json",
+      "title": "Finite Chains of Two-Complexes and Acyclic Covers",
+      "source": {
+        "repository": "laurentbartholdi/whitehead",
+        "commit": "e0683c947a3120af725ac7a29fc95a059798b64e"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-04-000004",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-04-000004-v1.json",
+      "title": "Quantum Pauli basis test",
+      "source": {
+        "repository": "Dengnifer/MIPStarRE-QPBT",
+        "commit": "179a37893d2a037cce0587ea932f5da819c7d78c"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-07-000001",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-07-000001-v1.json",
+      "title": "A counterexample to Vaught's conjecture for infinitary logic",
+      "source": {
+        "repository": "cameronfreer/vaught-conjecture-palomar",
+        "commit": "032ccb7a25b0ff6227128aa0aeba549c5901ea9a"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-13-000010",
+      "version": 2,
+      "path": "entries/PALOMAR-2026-10-13-000010-v2.json",
+      "title": "A uniform zero-free region for Dedekind zeta functions",
+      "source": {
+        "repository": "AxiomMath/DedekindZetaZeroFree",
+        "commit": "09afbb4ce6570c1615d58509dc197fc9f0956b7d"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-21-000001",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-21-000001-v1.json",
+      "title": "Discontinuity of the phase transition for the planar random-cluster and Potts models with q > 4 (Theorems 1.1 and 1.2)",
+      "source": {
+        "repository": "zijie123123/PottsDiscontinuity-lean",
+        "commit": "435fb57856860eda7a65c8fec9e5fb29eff2b46b"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-21-000008",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-21-000008-v1.json",
+      "title": "Improved zero-density estimates for the Riemann zeta function",
+      "source": {
+        "repository": "mrklwk/zeta-density-39-over-17-lean",
+        "commit": "c55fc0088bd4d7e61c5934abc5dd9153e8cb2f5d"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-11-000001",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-11-000001-v1.json",
+      "title": "Kinetic Aleksandrov estimates",
+      "source": {
+        "repository": "amelieloher/hypoelliptic-aleksandrov",
+        "commit": "d7e0125892d7bbd013c86c9c5d6a04e39e0168a6"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-11-000008",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-11-000008-v1.json",
+      "title": "Integrability of Liouville theory: the Kupiainen–Rhodes–Vargas proof of the DOZZ formula",
+      "source": {
+        "repository": "scottnarmstrong/DOZZ",
+        "commit": "5d770d1a6d69fac6dbb63060e8a89861bf3ee330"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-05-000003",
+      "version": 2,
+      "path": "entries/PALOMAR-2026-10-05-000003-v2.json",
+      "title": "Linear-Time Triangulation of Simple Polygons (Chazelle's Algorithm) in Lean 4",
+      "source": {
+        "repository": "RBarish-UTokyo/LinearTimeTriangulation-ChazelleAlgorithm-Lean4",
+        "commit": "92cc7745aa026aad3e80e7a72fe88cfbd909614a"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-10-19-000009",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-10-19-000009-v1.json",
+      "title": "Erdős Problem 408: distribution of iterated totient heights",
+      "source": {
+        "repository": "plasma-ai/erdos-408",
+        "commit": "4ea44bf911f8668aec10ec25c4b309e8ed476666"
+      }
+    }
+  ]
+}

@@ -4,6 +4,7 @@ import base64
 import csv
 import json
 import os
+import random
 from datetime import datetime
 
 import yaml
@@ -57,6 +58,7 @@ class Runner:
         redo_all,
         *,
         container_runtime="docker",
+        shuffle_seed=None,
     ):
         self.comp_name = comp_name
         self.runs_per_problem = runs_per_problem
@@ -71,7 +73,11 @@ class Runner:
         competition_config_path = f"{self.comp_configs_dir}/{self.comp_name}.yaml"
         with open(competition_config_path, "r") as f:
             self.competition_config = yaml.safe_load(f)
-        self.is_fa_comp = self.competition_config.get("final_answer", True)
+        if shuffle_seed is not None:
+            self.competition_config["shuffle_seed"] = shuffle_seed
+        harness_config = self.competition_config.get("harness_config") or {}
+        self.is_repo_eval = harness_config.get("repo_eval", harness_config.get("leanlean_projects", False))
+        self.is_fa_comp = self.competition_config.get("final_answer", True) and not self.is_repo_eval
         self.is_lean_comp = self.competition_config.get("lean", False)
         lean_task = self.competition_config.get("lean_task")
         if lean_task not in {None, "prove_or_disprove"}:
@@ -94,11 +100,22 @@ class Runner:
                 raise ValueError("answer_judge grading requires non-empty judge_configs.")
         self.is_auto_graded_comp = (
             self.is_fa_comp or self.is_lean_comp
-        ) and not self.uses_answer_judge
+        ) and not self.uses_answer_judge and not self.is_repo_eval
         self.options = self.competition_config.get("options", None)
 
         # Load problems
         self.problems = self._load_problems(self.problem_ids)
+        if self.problem_ids is not None:
+            by_id = {str(problem["problem_idx"]): problem for problem in self.problems}
+            self.problems = [
+                by_id[str(problem_id)] for problem_id in dict.fromkeys(self.problem_ids)
+                if str(problem_id) in by_id
+            ]
+        shuffle_seed = self.competition_config.get("shuffle_seed")
+        if shuffle_seed is not None:
+            if type(shuffle_seed) is not int:
+                raise ValueError("Competition 'shuffle_seed' must be an integer.")
+            random.Random(shuffle_seed).shuffle(self.problems)
         logger.info(
             f"Loaded {len(self.problems)} problems for competition {self.comp_name}"
         )
@@ -115,6 +132,9 @@ class Runner:
                   "problem_idx", "problem", "answer", and optionally "source" and "problem_types".
         """
         dataset_path = self.competition_config["dataset_path"]
+        if self.competition_config.get("dataset_format") == "leanlean":
+            from leanlean.evaluation import load_problems
+            return load_problems(dataset_path, problem_ids)
 
         if not os.path.exists(dataset_path):
             problem_column = self.competition_config.get("problem_column")
@@ -515,7 +535,14 @@ class Runner:
             BaseSolver: An instance of a solver (PureModelSolver or Agent).
         """
         if solver_config.get("harness"):
-            return HarnessSolver(
+            solver_class = HarnessSolver
+            harness_config = default_api_client_args.get("harness_config") or {}
+            repo_eval = harness_config.get("repo_eval", harness_config.get("leanlean_projects", False))
+            if repo_eval and (default_api_client_args.get("dataset_format") == "leanlean"
+                              or harness_config.get("leanlean_projects")):
+                from leanlean.solver import LeanLeanSolver
+                solver_class = LeanLeanSolver
+            return solver_class(
                 solver_config,
                 default_prompt_template,
                 default_api_client_args,
@@ -581,14 +608,20 @@ class Runner:
                     f"Problem {problem_idx:3}: {progress} ({self.runs_per_problem - problem_runs.N} left)\n"
                 )
 
-    def prepare_run(self, solver_name, set_request_metadata=True):
+    def prepare_run(self, solver_name, set_request_metadata=True, *, workers=None):
         """Prepare solver, status files, and pending batch for this competition."""
         solver_config_path = f"{self.solver_configs_dir}/{solver_name}.yaml"
         solver_config = self.load_solver_config(solver_config_path)
+        if workers is not None:
+            if type(workers) is not int or workers < 1:
+                raise ValueError("workers must be a positive integer")
+            solver_config["model_config"]["concurrent_requests"] = workers
         output_dir = f"{self.base_output_dir}/{self.comp_name}/{solver_name}"
         os.makedirs(output_dir, exist_ok=True)
 
         harness = self._resolve_harness(solver_config)
+        if self.competition_config.get("dataset_format") == "leanlean" and not harness:
+            raise ValueError("LeanLean project evaluation requires a coding harness")
         # Init the solver
         logger.info(f"Initializing the solver for {solver_name}")
         if "custom_instructions" in solver_config[
@@ -627,11 +660,17 @@ class Runner:
                 **model_harness_config,
                 **competition_harness_config,
             }
+            if "environment" in model_harness_config or "environment" in competition_harness_config:
+                default_api_client_args["harness_config"]["environment"] = {
+                    **model_harness_config.get("environment", {}),
+                    **competition_harness_config.get("environment", {}),
+                }
             default_api_client_args["harness"] = harness
             # Competition policy is authoritative: models cannot re-enable tools.
             default_api_client_args["allow_harness"] = self.competition_config.get(
                 "allow_harness", False
             )
+            default_api_client_args["dataset_format"] = self.competition_config.get("dataset_format")
             default_api_client_args["competition"] = self.comp_name
             default_api_client_args["solver_name"] = solver_name
             default_api_client_args["is_lean_comp"] = self.is_lean_comp
@@ -684,6 +723,10 @@ class Runner:
                 prompt_payload = {
                     "problem": problem.get("problem"),
                 }
+                if "repository_path" in problem:
+                    prompt_payload["repository_path"] = problem["repository_path"]
+                if "leanlean_project" in problem:
+                    prompt_payload["leanlean_project"] = problem["leanlean_project"]
                 if self.competition_config.get("lean", False):
                     prompt_payload["formal_statement"] = problem.get("formal_statement")
                 batch.append(
@@ -751,6 +794,7 @@ class Runner:
                 # For FA: If strict parsing finds no answer give the model one last chance to format correctly
                 if (
                     self.is_fa_comp and not self.uses_answer_judge
+                    and not solver_response.detailed_cost.get("deferred_grading")
                     and not run_limit_exceeded(solver_response.detailed_cost)
                     and solver_response.detailed_cost.get("refusal_category") != "reasoning_extraction"
                 ):
@@ -813,10 +857,13 @@ class Runner:
                 )
                 if (
                     solver_response.detailed_cost.get("refusal_category") == "reasoning_extraction"
-                    or run_limit_exceeded(solver_response.detailed_cost)
+                    or (
+                        run_limit_exceeded(solver_response.detailed_cost)
+                        and not solver_response.detailed_cost.get("deferred_grading")
+                    )
                 ):
                     grader_response = (None, False, 0)
-                elif not self.is_auto_graded_comp:
+                elif solver_response.detailed_cost.get("deferred_grading") or not self.is_auto_graded_comp:
                     grader_response = (
                         None,
                         "TODO Grading",

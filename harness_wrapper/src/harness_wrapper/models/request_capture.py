@@ -7,6 +7,7 @@ import json
 import os
 import secrets
 import threading
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterator, Mapping
@@ -29,6 +30,8 @@ from .request_policy import (
 RequestObserver = Callable[[str, Mapping[str, Any]], bool | None]
 ResponseObserver = Callable[[str, Mapping[str, Any]], None]
 RequestTransform = Callable[[str, dict[str, Any]], None]
+# Rewrites one complete SSE line (newline included) before the client sees it.
+StreamLineTransform = Callable[[bytes], bytes]
 
 
 def response_chunks(stream: Any) -> Iterator[bytes]:
@@ -179,9 +182,13 @@ class _CaptureServer(ThreadingHTTPServer):
     upstream_headers: Mapping[str, str]
     request_overrides: Mapping[str, object]
     request_transform: RequestTransform | None
+    request_json_transform: RequestTransform | None
+    stream_line_transform: StreamLineTransform | None
+    stream_stall_timeout: float | None
     static_get_responses: Mapping[str, Any]
     merge_request_overrides: bool
     request_drop_fields: frozenset[str]
+    drop_headers: frozenset[str]
     allow_remote_clients: bool
     offline_models: frozenset[str]
     upstream_timeout: float
@@ -197,9 +204,13 @@ class _CaptureUnixServer(_ThreadingUnixHTTPServer):
     upstream_headers: Mapping[str, str]
     request_overrides: Mapping[str, object]
     request_transform: RequestTransform | None
+    request_json_transform: RequestTransform | None
+    stream_line_transform: StreamLineTransform | None
+    stream_stall_timeout: float | None
     static_get_responses: Mapping[str, Any]
     merge_request_overrides: bool
     request_drop_fields: frozenset[str]
+    drop_headers: frozenset[str]
     allow_remote_clients: bool
     offline_models: frozenset[str]
     upstream_timeout: float
@@ -302,6 +313,8 @@ class _CaptureHandler(BaseHTTPRequestHandler):
                         else:
                             payload.update(self.server.request_overrides)
                         _drop_fields(payload, self.server.request_drop_fields)
+                        if self.server.request_json_transform is not None:
+                            self.server.request_json_transform(upstream_path, payload)
                     body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
                     if self.server.on_request(upstream_path, payload) is False:
                         self.send_error(409, "harness run limit reached")
@@ -330,6 +343,7 @@ class _CaptureHandler(BaseHTTPRequestHandler):
             if name.lower() not in self._HOP_BY_HOP_HEADERS
         }
         protected_headers = {name.lower() for name in self.server.upstream_headers}
+        protected_headers |= self.server.drop_headers
         headers = {
             name: value for name, value in headers.items() if name.lower() not in protected_headers
         }
@@ -341,8 +355,12 @@ class _CaptureHandler(BaseHTTPRequestHandler):
             headers=headers,
             method=self.command,
         )
+        timeout = self.server.upstream_timeout
+        if self.server.stream_stall_timeout is not None:
+            # A silent socket counts as a stall too.
+            timeout = min(timeout, self.server.stream_stall_timeout)
         try:
-            upstream = self.server.open_upstream(request, timeout=self.server.upstream_timeout)
+            upstream = self.server.open_upstream(request, timeout=timeout)
         except urllib.error.HTTPError as error:
             with error:
                 self._send_upstream(error.code, error.headers, error, upstream_path)
@@ -363,10 +381,15 @@ class _CaptureHandler(BaseHTTPRequestHandler):
         stream: Any,
         path: str,
     ) -> None:
+        transform = self.server.stream_line_transform
+        stall_timeout = self.server.stream_stall_timeout
+        if "text/event-stream" not in headers.get("content-type", "").lower():
+            transform = None
+            stall_timeout = None
         self.send_response(status_code)
         for name in ("content-type", "content-length", "content-encoding"):
             value = headers.get(name)
-            if value:
+            if value and not (transform is not None and name == "content-length"):
                 self.send_header(name, value)
         self.send_header("connection", "close")
         self.end_headers()
@@ -376,15 +399,46 @@ class _CaptureHandler(BaseHTTPRequestHandler):
             self.server.on_response,
             component="request_capture",
         )
+        pending = b""
+        # SSE comment lines (": keepalive") are not progress: an upstream that
+        # sends only those would otherwise hold the stream open indefinitely.
+        unseen = b""
+        last_progress = time.monotonic()
         for chunk in response_chunks(stream):
             capture.feed(chunk)
-            with suppress(BrokenPipeError, ConnectionResetError):
-                self.wfile.write(chunk)
-                self.wfile.flush()
+            if stall_timeout is not None:
+                lines = (unseen + chunk).split(b"\n")
+                unseen = lines.pop()
+                if any(line.strip() and not line.startswith(b":") for line in lines):
+                    last_progress = time.monotonic()
+                elif time.monotonic() - last_progress > stall_timeout:
+                    logger.bind(component="request_capture").warning(
+                        "Upstream stream sent no events for {:.0f}s; closing it", stall_timeout
+                    )
+                    break
+            if transform is not None:
+                # Forward complete lines only, so each one is rewritten whole.
+                data = pending + chunk
+                cut = data.rfind(b"\n") + 1
+                pending = data[cut:]
+                chunk = b"".join(transform(line) for line in data[:cut].splitlines(keepends=True))
+            if self._write_client(chunk):
                 continue
             break
+        else:
+            if pending and transform is not None:
+                self._write_client(transform(pending))
         capture.finish()
         self.close_connection = True
+
+    def _write_client(self, chunk: bytes) -> bool:
+        """Write one chunk; return False once the client has disconnected."""
+
+        with suppress(BrokenPipeError, ConnectionResetError):
+            self.wfile.write(chunk)
+            self.wfile.flush()
+            return True
+        return False
 
     def log_message(self, format: str, *args: object) -> None:
         return
@@ -404,8 +458,14 @@ class RequestCaptureProxy:
         open_upstream: Callable[..., Any] | None = None,
         request_overrides: Mapping[str, object] | None = None,
         request_transform: RequestTransform | None = None,
+        # Rewrites JSON object bodies only; unlike request_transform it leaves
+        # bodiless and non-JSON requests untouched.
+        request_json_transform: RequestTransform | None = None,
+        stream_line_transform: StreamLineTransform | None = None,
+        stream_stall_timeout: float | None = None,
         static_get_responses: Mapping[str, Any] | None = None,
         request_drop_fields: tuple[str, ...] | frozenset[str] = (),
+        drop_headers: tuple[str, ...] | frozenset[str] = (),
         merge_request_overrides: bool = False,
         listen_host: str = "127.0.0.1",
         client_host: str = "127.0.0.1",
@@ -423,8 +483,14 @@ class RequestCaptureProxy:
         self._upstream_headers = dict(upstream_headers or {})
         self._request_overrides = dict(request_overrides or {})
         self._request_transform = request_transform
+        self._request_json_transform = request_json_transform
+        self._stream_line_transform = stream_line_transform
+        self._stream_stall_timeout = stream_stall_timeout
         self._static_get_responses = dict(static_get_responses or {})
         self._request_drop_fields = frozenset(str(field) for field in request_drop_fields)
+        # Client request headers never forwarded, e.g. a placeholder credential
+        # beside the Bearer token in upstream_headers.
+        self._drop_headers = frozenset(str(name).lower() for name in drop_headers)
         self._merge_request_overrides = bool(merge_request_overrides)
         self._listen_host = listen_host
         self._client_host = client_host
@@ -470,8 +536,12 @@ class RequestCaptureProxy:
         server.upstream_headers = self._upstream_headers
         server.request_overrides = self._request_overrides
         server.request_transform = self._request_transform
+        server.request_json_transform = self._request_json_transform
+        server.stream_line_transform = self._stream_line_transform
+        server.stream_stall_timeout = self._stream_stall_timeout
         server.static_get_responses = self._static_get_responses
         server.request_drop_fields = self._request_drop_fields
+        server.drop_headers = self._drop_headers
         server.merge_request_overrides = self._merge_request_overrides
         server.allow_remote_clients = self._allow_remote_clients
         server.offline_models = self._offline_models

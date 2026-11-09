@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "name": "leanlean-demo",
+  "description": "The four small projects from LeanLean palomar-compact4, pinned to their original registry versions.",
+  "entries": [
+    {
+      "id": "PALOMAR-2026-08-20-000004",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-08-20-000004-v1.json",
+      "status": "registered",
+      "source": {
+        "repository": "guanyangwang/ktv-swap-lean-comparator",
+        "commit": "fd4dc985900b1fba59791067dcf3bf9341a94bda"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-08-21-000002",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-08-21-000002-v1.json",
+      "status": "registered",
+      "source": {
+        "repository": "lennrt/palomar-formalizations",
+        "commit": "090b3b300ba8ec76fdba09a17f086953d13f2653"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-08-27-000020",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-08-27-000020-v1.json",
+      "status": "registered",
+      "source": {
+        "repository": "BrandonMYates/schwarzschild-comparator",
+        "commit": "d8b6acf8263d4924356ac8abb62668c137ab61cd"
+      }
+    },
+    {
+      "id": "PALOMAR-2026-08-29-000003",
+      "version": 1,
+      "path": "entries/PALOMAR-2026-08-29-000003-v1.json",
+      "status": "registered",
+      "source": {
+        "repository": "Arthur742Ramos/dinitz-garg-goemans-counterexample-lean",
+        "commit": "cc7284cf415fc2a773f00d400319ef39663c277a"
+      }
+    }
+  ]
+}

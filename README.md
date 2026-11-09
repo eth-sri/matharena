@@ -66,6 +66,8 @@ bash scripts/run_all_fa.sh path/to/model
 
 For ArXivLean September, follow the [Lean 4.34.1 setup instructions](readmes/README_arxivlean_september_evaluation.md) before running the evaluation. Earlier editions use the [legacy setup instructions](readmes/README_arxivlean.md).
 
+For LeanLean October, see the [project preparation and evaluation guide](readmes/README_leanlean.md) and the [published projects and model submissions](https://github.com/eth-sri/leanlean-october).
+
 **Example:**
 ```bash
 uv run python scripts/run.py --comp aime/aime_2025 --models openai/gpt-4o 
@@ -96,6 +98,7 @@ The table below maps all non-deprecated competitions currently shown on the webs
 | BrokenArxiv | 08/2026 | `arxiv_false/august.yaml` | Yes |
 | BrokenArxiv | 09/2026 | `arxiv_false/september.yaml` | Yes |
 | ArXivLean | 09/2026 | `arxivlean/september.yaml` | No (Lean comparator) |
+| LeanLean | 10/2026 | `leanlean/october-2026.yaml` | Yes (LeanLean postprocessing) |
 | Visual Math | Kangaroo 2025 1-2 | `kangaroo/kangaroo_2025_1-2.yaml` | No |
 | Visual Math | Kangaroo 2025 3-4 | `kangaroo/kangaroo_2025_3-4.yaml` | No |
 | Visual Math | Kangaroo 2025 5-6 | `kangaroo/kangaroo_2025_5-6.yaml` | No |

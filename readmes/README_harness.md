@@ -34,6 +34,24 @@ results after exhausting their output-limit continuations, preserving reported u
 and partial work. Transient connection failures remain errors. Lean runs still check
 and submit `Solution.lean` even when chat output is empty.
 
+## Monitoring and preflight
+
+A competition can enable the `harness_config.monitoring` flags independently.
+Use `diff` for source checkpoints, `cpu` and `ram` for host cgroup samples, and
+`commands` for command timing. Flags default to false. Attempts save monitoring
+data next to their workspaces in `WORKSPACE.telemetry/`.
+
+`command_monitoring_backend: host` records shell-tool boundaries and host-run
+checks in `host-commands.jsonl`. Each shell-tool call has one duration.
+`command_monitoring_backend: wrapper` needs a compatible image with tracing
+wrappers and writes supported process invocations to `commands.jsonl`.
+See [LeanLean command monitoring](README_leanlean.md#command-monitoring) for
+preparing either image and interpreting October's historical traces.
+
+Set `harness_config.preflight` to run a shell check inside the harness
+environment before model access. A timeout or nonzero exit status stops the
+attempt, with logs in `preflight_stdout.log` and `preflight_stderr.log`.
+
 ## ArxivMath August: SageMath and answer judging
 
 `arxiv/august` enables harnesses and uses the shared image with SageMath 9.5.

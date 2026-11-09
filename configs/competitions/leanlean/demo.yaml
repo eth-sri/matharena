@@ -1,0 +1,51 @@
+# Populate eval-runtime.json with scripts/leanlean_prepare_eval.sh first.
+dataset_format: leanlean
+dataset_path: leanlean/work/demo/run/bundle
+final_answer: false
+lean: false
+allow_harness: true
+default_harness: codex
+n_problems: 4
+instruction: |
+  Compress the Lean formalization in the supplied project while preserving its
+  mathematical statements and permitted axioms. Edit the repository files in place.
+  You may simplify proofs and helper declarations, but do not weaken statements,
+  add axioms, use sorry, or change the challenge, Comparator configuration,
+  lean-toolchain, lakefile, dependency lockfile, or dependencies.
+
+  The shell starts in /work. The project directory and entry points are below.
+  Run `python /work/proof_length.py` to measure Lean source tokens (excluding
+  comments, imports, the challenge, lakefiles and dependencies).
+  From the project directory, run `lake build` and `lake comparator` to check
+  your changes. Comparator reads `comparator.json` by default; use `--config`
+  if the project's configuration is elsewhere. Older projects without native
+  Comparator can use `/work/check.sh`, which also checks protected files.
+  These commands run offline using the dependencies in the image. They provide
+  feedback; the saved source files will be scored separately.
+
+  Save your changes in /work/repository and finish with a brief description.
+  Do not paste the whole project into your response.
+
+  {problem}
+harness_config:
+  # Use the shared ArxivLean profile: local file, search, and shell tools.
+  tools_enabled: true
+  minimal_context: true
+  subagents: {}
+  monitoring:
+    diff: true
+    cpu: true
+    ram: true
+    commands: true
+  preflight: python proof_length.py && ./check.sh
+  repo_eval: true
+  helper_files: data/leanlean/helpers
+  runtime_manifest: leanlean/work/demo/run/bundle/eval-runtime.json
+  keep_workspaces: true
+  run_check_after_harness: false
+  direct_network: false
+  read_only_rootfs: true
+  memory_gb: 64
+  cpu_limit: 8
+  environment:
+    LEAN_NUM_THREADS: '8'

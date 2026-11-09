@@ -1,0 +1,88 @@
+{
+  "source": "lean-lean working tree",
+  "head": "a940972ba7b7ef8a138680fc0bfbb62926fbb891",
+  "copied_at": "2026-11-03",
+  "note": "Files with matches_head=false carry changes that are not in the lean-lean head commit. tokens.py and quantify_compression_categories.py: 2026-11-05 fix that counts code after the import command on the same line.",
+  "files": {
+    "scripts/__init__.py": {
+      "sha256": "a452baac6493facf64e23c6085831673265ba9e7404fec71e376ec9e4fffe74c",
+      "matches_head": true
+    },
+    "src/leanlean/__init__.py": {
+      "sha256": "01dbf36251eaaeacd1067da61dbb20e80196be70ade83877f57f16129e41af7b",
+      "matches_head": true
+    },
+    "src/leanlean/metrics/__init__.py": {
+      "sha256": "58280282cedb9193c1d19cfb7c91698bff0891de73d66a3c503e0126c5f5bc06",
+      "matches_head": true
+    },
+    "src/leanlean/preprocessing/__init__.py": {
+      "sha256": "f490418f921c863c002da6726ade15544447aa2cc3a237e563835944110319f4",
+      "matches_head": true
+    },
+    "src/leanlean/metrics/tokens.py": {
+      "sha256": "58241348b9b84eb4d4a96ff078a8a943731d672a9130363227f0386205649b4d",
+      "matches_head": false
+    },
+    "src/leanlean/preprocessing/graph_artifact.py": {
+      "sha256": "ed5f0dcd0a0b3585f3f0362331cf9fa9a47547e0f264c77503fb891f3bb26000",
+      "matches_head": true
+    },
+    "src/leanlean/preprocessing/repositories.py": {
+      "sha256": "90f839ed9d3c8460df81cd1d97fe92ae49b99714c3b1a7a24fd3668a7845bb8c",
+      "matches_head": true
+    },
+    "scripts/analysis/abbreviations.py": {
+      "sha256": "c82e2f3e73fa498e5e5c325b7771fdd4077fd65ee83545f93258889acb523d9b",
+      "matches_head": true
+    },
+    "scripts/analysis/checkpoint_identity.py": {
+      "sha256": "4ac5e60c50afc3270f46de074528976e1c000cbbdb01791ebce80e83598df1e3",
+      "matches_head": false
+    },
+    "scripts/analysis/classify_compression.py": {
+      "sha256": "0b1d6c7d5b8f1be8d2201aab8d4a67f83d3f0ffbd0cf97a5284fcb5da4af1ac6",
+      "matches_head": false
+    },
+    "scripts/analysis/expand_definitions.py": {
+      "sha256": "79333061bd2c40c126518c54d1658fa16d54ec437d812addf6414f8c1b57b647",
+      "matches_head": true
+    },
+    "scripts/analysis/expand_macro_programs.py": {
+      "sha256": "ef827e8c13fdf7e7fbec7e33a8e0a6d285b86e4e3712fa81f43cfb34c34af4fb",
+      "matches_head": true
+    },
+    "scripts/analysis/expand_macros.py": {
+      "sha256": "c74e90394e1c5131746a16e281654781a4a6d438676d190cf7df624b2553fb3e",
+      "matches_head": true
+    },
+    "scripts/analysis/generated_syntax.py": {
+      "sha256": "921b78577a99f8947c7954927d16580cced7ad6737de377ea0a643f57beb0c14",
+      "matches_head": true
+    },
+    "scripts/analysis/ledger.py": {
+      "sha256": "719e99f26c1ee58a52859d657cb4cef0abdff783ca31d115e1cc13ee5bc164a5",
+      "matches_head": true
+    },
+    "scripts/analysis/program_sites.py": {
+      "sha256": "b0068aa448f92791ee092d1e021544d413a81f89042c15429ed8502295c76c36",
+      "matches_head": true
+    },
+    "scripts/analysis/proof_hunks.py": {
+      "sha256": "9da0fbfc4256cd58a0c59349c2fe0e2159e1b01a5a062ad23f105f071bb5d586",
+      "matches_head": true
+    },
+    "scripts/analysis/quantify_compression_categories.py": {
+      "sha256": "066010e2ecc23fe2749b87c005af880568a46806d7a544130ff46aebd3b9083f",
+      "matches_head": false
+    },
+    "scripts/analysis/source_accounting.py": {
+      "sha256": "da689658869faa7b76dee1a018d859ea8f47a8dac60a846a3b08effa848dcf8b",
+      "matches_head": true
+    },
+    "LICENSE": {
+      "sha256": "a2cef7d4730688c78d22e27ccc1a2f9562d9c6565a4b8e8aa946202e94167aab",
+      "matches_head": true
+    }
+  }
+}

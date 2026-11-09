@@ -212,6 +212,7 @@ class Agent(ABC):
             "harness_wrapper.harnesses.qwen_code",
             "harness_wrapper.harnesses.opencode",
             "harness_wrapper.harnesses.deepcode",
+            "harness_wrapper.harnesses.deepseek_harness",
             "harness_wrapper.harnesses.grok_build",
             "harness_wrapper.harnesses.muse_code",
             "harness_wrapper.harnesses.mistral_vibe",

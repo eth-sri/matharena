@@ -1,0 +1,41 @@
+# deepseek_v41_flash_1017.yaml under DeepSeek Harness (dsh) instead of Deep Code.
+model: deepseek/deepseek-v4.1-flash-1017
+api: openrouter
+harness: dsh
+# npm `latest` tag on 2026-11-04; dsh has no non-prerelease version yet.
+harness_version: "0.2.1-rc.5"
+harness_config:
+  auth: api
+  container_executable: dsh
+  cpu_limit: 4
+  memory_gb: 12
+  pids_limit: 768
+  tmpfs_size: 1g
+  environment:
+    # dsh's own per-request output cap (default 256000) and context window.
+    # 393216 is DeepSeek's own endpoint limit for this model on OpenRouter.
+    # dsh compacts at min(0.8 W, W - O - 65536), 589824 input tokens here.
+    DSH_MAX_OUTPUT_TOKENS: "393216"
+    DSH_CONTEXT_WINDOW: "1048576"
+# No max_tokens/temperature/top_p: dsh owns the Messages body and sends neither
+# sampling field, so the provider defaults (1.0 / 1.0) apply as in the 1017 config.
+reasoning_effort: max
+concurrent_requests: 8
+# Recorded OpenRouter USD per 1M tokens for these evaluations.
+# https://openrouter.ai/api/v1/models/deepseek/deepseek-v4.1-flash-1017/endpoints
+read_cost: 0.30
+cache_read_cost: 0.006
+write_cost: 1.20
+human_readable_id: DeepSeek-V4.1-Flash-1017 (Max, DSH)
+date: "2026-10-17"
+extra_body:
+  provider:
+    only:
+      - together
+    allow_fallbacks: false
+    require_parameters: true
+other_params:
+  open: true
+  creator: DeepSeek
+  parameters: 552
+  huggingface_id: deepseek-ai/DeepSeek-V4.1-Flash-1017
