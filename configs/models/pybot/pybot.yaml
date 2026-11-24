@@ -1,0 +1,16 @@
+# PyBot (https://github.com/huggingface/pybot): a rule-based chatbot in pure Python, no weights.
+# Start the endpoint first:  python scripts/pybot_server.py /path/to/pybot 8765
+model: huggingface/pybot
+api: custom
+api_key_env: null
+base_url: http://localhost:8765/v1
+read_cost: 0.0
+write_cost: 0.0
+concurrent_requests: 8
+human_readable_id: PyBot
+date: "2026-11-16"
+other_params:
+  open: true
+  creator: Hugging Face
+  parameters: 0
+  active_parameters: 0
